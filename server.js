@@ -1,5 +1,6 @@
 // Server Logic
 const WebSocket = require('ws');
+//import WebSocket from "ws";
 
 const PORT = 3000;
 const wss = new WebSocket.Server({ port: PORT });
@@ -1026,6 +1027,6 @@ function checkBingo(board, team) {
 
 setInterval(() => {
     checkRoomRemoval();
-}, 1 * 1000)
+}, 60 * 1000)
 
 console.log(`WebSocket server is running on https://${process.env.PROJECT_DOMAIN || 'localhost'}:${PORT}`); 

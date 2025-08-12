@@ -13,6 +13,7 @@
 // @grant        none
 // ==/UserScript==
 'use strict';
+
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes;
 let bingoSaveData = { board: [], lastSave: {} };
