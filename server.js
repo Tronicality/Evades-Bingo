@@ -1,12 +1,21 @@
-// Server Logic
+// ===== Dependencies =====
+const express = require('express');
+const http = require('http');
 const WebSocket = require('ws');
 
-const PORT = process.env.PORT || 10000;
-const wss = new WebSocket.Server({ port: PORT });
+// ===== App Setup =====
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
+// Optional HTTP route (for Render health checks / testing)
+app.get('/', (req, res) => {
+    res.send('Evades Bingo Server is running');
+});
+
+// ===== Game Variables =====
 let roomPool = {};
 let userIds = new Set([]);
-
 const minMarkAttemptTime = 40; // seconds
 const TEAMS = new Set(['red', 'green', 'blue']);
 
@@ -73,18 +82,25 @@ function randomNumber(max) {
     return Math.floor(Math.random() * (max + 1));
 }
 
+function heartbeat() {
+    this.isAlive = true;
+}
+
 wss.on('connection', (ws) => {
+    ws.isAlive = true;
+    ws.on('pong', heartbeat);
+
     console.log(`${ws.id || "Client"} connected`);
 
     ws.on('message', (message) => {
-        handleMessage(JSON.parse(message), ws)
-    })
+        handleMessage(JSON.parse(message), ws);
+    });
 
     ws.on('close', () => {
-        handleGameDisconnect(ws.id)
+        handleGameDisconnect(ws.id);
         console.log(`${ws.id || "Client"} disconnected`);
-    })
-})
+    });
+});
 
 function validateSendMessage(type, message) {
     // doesn't exist in server_messages.type 
@@ -282,7 +298,7 @@ function validateCreateRoom(ws) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.USER_ID_NOT_FOUND);
         return false;
     }
-    
+
     if (isPlayerInARoom(ws)) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.ROOM_ALREADY_EXISTS)
         return false;
@@ -463,14 +479,14 @@ function restartGame(data, ws) {
 }
 
 function findUserTeam(userId, room) {
-    for (const [_, teamList] of Object.entries(room.teams)) {
+    for (const [teamName, teamList] of Object.entries(room.teams)) {
         const playerIndex = teamList.findIndex((playerId) => playerId === userId);
 
         if (playerIndex === -1) continue;
-        return true
+        return teamName
     }
 
-    return false
+    return undefined
 }
 
 function validateMakeMove(room, ws, cell) { // again in future i'll redo validation (cuz might never come back to it - Bert 12/08/2025 3pm)
@@ -572,7 +588,7 @@ function makeMove(data, ws) {
     oldCell.marked_info.player = ws.id;
     oldCell.marked_info.reached_index = newCell.index;
     oldCell.marked_info.time = newCell.time;
-    oldCell.marked_info.team = newCell.team;
+    oldCell.marked_info.team = findUserTeam(ws.id, room);
 
     //console.log(`User ${ws.id} marked cell at (${newCell.row}, ${newCell.col}) in room ${roomId}`);
     if (checkBingo(room.board, data.cell.team)) {
@@ -650,6 +666,7 @@ function leaveRoom(data, ws) {
         // Notify remaining players
         room.players.forEach(player => {
             sendData(player, SERVER_MESSAGES.TYPES.PLAYER_LEFT, { user_id: ws.id });
+            //sendData(player, SERVER_MESSAGES.TYPES.UPDATE_TEAMS, { teams: room.teams });
         });
         //console.log(`Remaining players notified in room ${roomId}`);
     }
@@ -658,7 +675,7 @@ function leaveRoom(data, ws) {
         // If the admin leaves, assign a new admin
         if (room.players.length > 0) {
             const newAdmin = room.players[0].id // Assign the first player as the new admin
-            room.admin = newAdmin; 
+            room.admin = newAdmin;
             sendData(newAdmin, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
             //console.log(`New admin assigned: ${room.admin}`);
         }
@@ -708,6 +725,19 @@ function handleGameDisconnect(userId) {
     findAndRemovePlayerFromRoom(userId);
 
     // Maybe add buffer for reconnect chances
+}
+
+function checkWebSockets() {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            console.log(`Closing dead connection: ${ws.id || 'Unknown ID'}`);
+            handleGameDisconnect(ws.id);
+            ws.terminate();
+            return;
+        }
+        ws.isAlive = false;
+        ws.ping();
+    });
 }
 
 function checkRoomRemoval() {
@@ -1023,6 +1053,12 @@ function checkBingo(board, team) {
 
 setInterval(() => {
     checkRoomRemoval();
-}, 5 * 60 * 1000)
+    checkWebSockets();
+}, 2 * 60 * 1000)
 
-console.log(`WebSocket server is running on https://evades-bingo.onrender.com/:${PORT}`); 
+
+// ===== Start Server =====
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});

@@ -13,12 +13,13 @@
 // @grant        none
 // ==/UserScript==
 'use strict';
+
+
+// Globals
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes;
 let bingoSaveData = { board: [], lastSave: {} };
-
-const server = 'https://evades-bingo.onrender.com/'
-
+const TEAMS = new Set(['red', 'green', 'blue']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
     "ERROR": "error",
@@ -28,6 +29,7 @@ const MESSAGE_TYPES = { // Fake Enum :sob:
 
 
 // Utilities
+
 
 function isPlayerAlive() {
     if (!self) return
@@ -95,40 +97,21 @@ function clearBingoSaveData() {
 // Server connection part
 
 
-function connectToServer() {
-    if (!self) {
-        showMessage('Please enter a server on evades')
-        return;
-    }
-
-    BingoClient.userId = self.name;
-
-    BingoClient.socket = new WebSocket(server);
-
-    // Handle connection open
-    BingoClient.socket.addEventListener('open', () => {
-        showMessage('Connected to the server')
-        BingoClient.socket.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
-    });
-
-    // Handle incoming messages
-    BingoClient.socket.addEventListener('message', (event) => {
-        const message = JSON.parse(event.data);
-
-        switch (message.type) {
+function handleServerMessage(message) {
+    switch (message.type) {
             case 'registered':
                 console.log(`Registered with ID: ${message.data.id}`);
                 BingoClient.isConnected = true;
                 break;
             case 'room_created':
                 showMessage(`Room created with ID: ${message.data.id}`)
-                //console.log(`Room created with ID: ${message.data.id}`);
+                console.log(`Room created with ID: ${message.data.id}`);
 
                 BingoClient.roomId = message.data.id;
                 break;
             case 'room_joined':
                 showMessage('Joined Room')
-                console.log(`Joined room with ID: ${message.data.id}`);
+                console.log(`Joined room, ID: ${message.data.id}`);
                 break;
             case 'left_room':
                 clearClient();
@@ -188,7 +171,7 @@ function connectToServer() {
                 break;
             case 'update_teams':
                 showMessage('Teams have been updated')
-                console.log("New Teams:", message.data.teams)
+                //console.log("New Teams:", message.data.teams)
 
                 BingoClient.current.teams = message.data.teams;
                 updateBingoTeams();
@@ -202,6 +185,32 @@ function connectToServer() {
                 showMessage(`Something broke! Check Console!`, MESSAGE_TYPES.ERROR);
                 console.warn('Unknown message type:', message.type);
         }
+}
+
+function connectToServer() {
+    if (!self) {
+        showMessage('Please enter a server on evades')
+        return;
+    }
+
+    BingoClient.userId = self.name;
+
+    const server = location.hostname === 'localhost'
+        ? 'ws://localhost:10000'
+        : 'wss://evades-bingo.onrender.com';
+
+    BingoClient.socket = new WebSocket(server);
+
+    // Handle connection open
+    BingoClient.socket.addEventListener('open', () => {
+        showMessage('Connected to the server')
+        BingoClient.socket.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
+    });
+
+    // Handle incoming messages
+    BingoClient.socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data);
+        handleServerMessage(message);
     });
 
     // Handle connection close
@@ -212,16 +221,6 @@ function connectToServer() {
 
         clearClient();
     });
-}
-
-function disconnectFromServer() {
-    if (BingoClient.socket) {
-        BingoClient.socket.close();
-    }
-    else {
-        showMessage('No active connection to disconnect');
-        console.log('No active connection to disconnect');
-    }
 }
 
 const CLIENT_MESSAGE_TYPES = {
@@ -246,8 +245,22 @@ function clearClient() {
     hideBingoBoardUI();
 }
 
+function disconnectFromServer() {
+    if (BingoClient.socket) {
+        BingoClient.socket.close();
+    }
+    else {
+        showMessage('No active connection to disconnect');
+        console.log('No active connection to disconnect');
+    }
+}
+
 function sendData(type, data) {
-    BingoClient.socket.send(JSON.stringify({ type: type, data: data }))
+    try {
+        BingoClient.socket.send(JSON.stringify({ type: type, data: data }))
+    } catch (error) {
+        showMessage("Something Broke! Check console!", MESSAGE_TYPES.ERROR);
+    }
 }
 
 function createRoom(team, maxPlayerCount) {
@@ -314,15 +327,25 @@ window.BingoClient = {
     joinTeam,
     leaveTeam,
     changeTeam,
-    updateBingoTeams,
     updateWholeBoard,
 };
+
+BingoClient.connectToServer = () => {
+    showMessage('Connecting...');
+    connectToServer();
+}
+
+BingoClient.disconnectFromServer = () => {
+    disconnectFromServer();
+}
 
 BingoClient.createRoom = () => {
     createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount);
 }
 
 BingoClient.joinRoom = () => {
+    const roomId = prompt('Enter room ID');
+    BingoClient.roomId = roomId;
     joinRoom(BingoClient.roomId, BingoClient.settings.team);
 }
 
@@ -338,20 +361,44 @@ BingoClient.restartGame = () => {
     restartGame(BingoClient.roomId);
 }
 
-BingoClient.joinTeam = () => {
-    joinTeam(BingoClient.roomId, BingoClient.settings.team)
+BingoClient.joinTeam = (newTeam) => {
+    joinTeam(BingoClient.roomId, newTeam)
 }
 
 BingoClient.leaveTeam = () => {
-    leaveTeam(BingoClient.roomId, BingoClient.settings.team)
+    leaveTeam(BingoClient.roomId, BingoClient.current.team)
 }
 
-BingoClient.changeTeam = () => {
-    changeTeam(BingoClient.roomId, BingoClient.settings.team)
+BingoClient.changeTeam = (newTeam) => {
+    changeTeam(BingoClient.roomId, newTeam)
+}
+
+BingoClient.updateWholeBoard = () => {
+    updateWholeBoard();
+}
+
+BingoClient.sendRecentRun = () => {
+    makeMarkAttempt();
+}
+
+BingoClient.sendAllRuns = () => {
+    attemptMarkEachCell();
+}
+
+function findUserTeam(userId) {
+    for (const [teamName, teamList] of Object.entries(BingoClient.current.teams)) {
+        const playerIndex = teamList.findIndex((playerId) => playerId === userId);
+
+        if (playerIndex === -1) continue;
+        return teamName
+    }
+
+    return undefined
 }
 
 function updateBingoTeams() {
-
+    BingoClient.current.team = findUserTeam(BingoClient.userId)
+    updateWholeBoard();
 }
 
 function getCellInfo() {
@@ -866,7 +913,17 @@ function updateCellBigBoard(targetCell, row, col) {
     updateTooltipInfo(div, targetCell)
 }
 
+function updateTeamCell(row, col) {
+    const cell = BingoClient.board[row][col];
+    const newTeam = findUserTeam(cell.marked_info.player);
+
+    if (!newTeam) return;
+
+    cell.marked_info.team = newTeam;
+}
+
 function updateBoard(targetCell, row, col) {
+    updateTeamCell(row, col);
     updateCellMiniBoard(targetCell, row, col);
     updateCellBigBoard(targetCell, row, col);
 }
@@ -1041,5 +1098,343 @@ function addBingoBoardUI(board) {
     BingoClient.hasBoardUI = true;
 }
 
+
+// Settings Replacement UI
+
+
+// Settings Helpers
+function updateSettingsContainerDisplay(displayStyle, targetSubClass, filterBingo = false) {
+    if (!displayStyle) return;
+
+    const settingsContainer = document.querySelector('.settings-container');
+
+    if (!settingsContainer) {
+        console.log('Settings container not found');
+        return;
+    }
+
+    if (targetSubClass) {
+        const subClass = settingsContainer.querySelectorAll(targetSubClass);
+
+        if (!subClass) {
+            console.log(`Sub Class ${targetSubClass} not found`)
+            return;
+        }
+
+        subClass.forEach((label) => {
+            if (filterBingo && label.className.includes('bingo')) return;
+
+            label.style.display = displayStyle;
+        });
+    }
+    else {
+        settingsContainer.childNodes.forEach((child) => {
+            if (filterBingo && child.className.includes('bingo')) return;
+
+            child.style.display = displayStyle;
+        });
+    }
+}
+
+function updateOtherBingoSettingsDisplays(div, targetId, displayStyle) {
+    if (!div || !targetId || !displayStyle) return;
+
+    const bingoLabels = settingsCategories.querySelectorAll('label[id*="bingo"]');
+    bingoLabels.forEach(label => {
+        if (label.id !== targetId) {
+            //const otherClassLabel = button.id.replace('-button', '-label');
+            updateSettingsContainerDisplay('none', `.${otherClassLabel}`);
+        }
+    });
+}
+
+function hideSettingsCategoryActive() {
+    const settingsCategories = document.querySelector('.settings-categories');
+    if (!settingsCategories) {
+        console.log('Settings categories not found');
+        return;
+    }
+
+    const activeCategory = settingsCategories.querySelector('.settings-category.active');
+    if (activeCategory) {
+        activeCategory.classList.remove('active');
+    }
+}
+
+function addLabel(labelId, labelText) {
+    const label = document.createElement('label');
+    label.style.display = 'none';
+    label.classList.add('settings-label');
+    label.classList.add(labelId);
+    //exampleLabel.setAttribute('for', 'example-bingo-setting');
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'settings-setting';
+    labelDiv.textContent = labelText;
+
+    label.appendChild(labelDiv);
+
+    return label;
+}
+
+function addCheckboxSetting(labelId, labelText, checkboxId) {
+    const label = addLabel(labelId, labelText);
+    const labelDiv = label.querySelector('.settings-setting');
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'settings-checkbox';
+    input.id = checkboxId;
+
+    labelDiv.appendChild(input);
+
+    return label;
+}
+
+function addSliderSetting(labelId, labelText, sliderId, min, max, step) {
+    const label = addLabel(labelId, labelText);
+    const labelDiv = label.querySelector('.settings-setting');
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.className = 'settings-slider';
+    input.id = sliderId;
+    input.min = min;
+    input.max = max;
+    input.step = step;
+
+    const valueDisplay = document.createElement('span');
+    valueDisplay.textContent = `: ${input.value}`;
+
+    input.addEventListener('input', (event) => {
+        valueDisplay.textContent = `: ${event.target.value}`;
+    });
+
+    labelDiv.appendChild(input);
+    labelDiv.appendChild(valueDisplay);
+
+    return label;
+}
+
+function addSelectSetting(labelId, labelText, selectId, options, selectedIndex = 0, functionCallback = undefined) {
+    const label = addLabel(labelId, labelText);
+    const labelDiv = label.querySelector('.settings-setting');
+
+    const input = document.createElement('select');
+    input.className = 'settings-select';
+    input.id = selectId; // Later Br1h realised, why did I add this as an ID???? why not class??? am i bugging????
+
+    for (const option of options) {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.label;
+        input.appendChild(optionElement);
+    }
+
+    input.selectedIndex = selectedIndex;
+
+    if (functionCallback) {
+        input.addEventListener('change', (event) => {
+            functionCallback(event.target.value);
+        });
+    }
+
+    labelDiv.appendChild(input);
+
+    return label;
+}
+
+function addButtonSetting(labelId, labelText, buttonId, functionCallBack) {
+    const label = addLabel(labelId, labelText);
+    const labelDiv = label.querySelector('.settings-setting');
+
+    const input = document.createElement('button');
+    input.type = 'checkbox';
+    input.className = 'settings-checkbox';
+    input.id = buttonId;
+    input.textContent = 'Click Me!';
+
+    input.addEventListener('click', event => functionCallBack(event));
+
+    labelDiv.appendChild(input);
+
+    return label;
+}
+
+function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, saveButtonCallback) {
+    const settingsCategories = div.querySelector('.settings-categories');
+
+    // Adding Tab Button
+    const bingoButton = document.createElement('button');
+    bingoButton.id = id;
+    bingoButton.classList.add('settings-category');
+    bingoButton.textContent = tabText;
+
+    // Handling switching onto Bingo Tab
+    bingoButton.addEventListener('click', () => {
+        // Hide other settings
+        hideSettingsCategoryActive();
+        updateSettingsContainerDisplay('none');
+
+        // Show Bingo settings
+        bingoButton.classList.add('active');
+        updateSettingsContainerDisplay('block', `.${classLabel}`);
+    });
+
+    settingsCategories.append(bingoButton);
+    addLabelsCallback(classLabel);
+
+
+    // Handling switching off Bingo Tab, bro i really thought it'd be free but it got so complicated
+    settingsCategories.addEventListener('click', (event) => {
+        // If clicking on same button or empty space around it
+        if (event.target.id === id ||
+            event.target.className.includes('settings-categories') ||
+            (event.target.id !== id && event.target.id.includes('bingo'))
+        ) return;
+
+        // Show all Settings
+        // Don't show if clicking on another bingo tab 
+        if (!event.target.id.includes('bingo')) {
+            updateSettingsContainerDisplay('block', undefined, true);
+        }
+
+        // Hide Bingo settings
+        document.getElementById(id).classList.remove('active');
+        updateSettingsContainerDisplay('none', `.${classLabel}`);
+    });
+
+    //Handling Save Button Update
+    const saveButton = div.querySelector('input.settings-button[value="Save"]');
+    saveButton.addEventListener('click', event => saveButtonCallback(event))
+}
+
+// Bingo Server Settings
+function addBingoServerSettingsLabels(labelId) {
+    const settingsContainer = document.querySelector('.settings-container');
+
+    if (!settingsContainer) {
+        console.log('Settings container not found');
+        return;
+    }
+
+    const connectToServerBtn = addButtonSetting(labelId, 'Connect to Server', 'connectToServerBtn', BingoClient.connectToServer);
+    const disconnectFromServerBtn = addButtonSetting(labelId, 'Disconnect from server', 'disconnectFromServerBtn', BingoClient.disconnectFromServer)
+    const createRoomBtn = addButtonSetting(labelId, 'Create Room', 'createRoomBtn', BingoClient.createRoom);
+    const joinRoomBtn = addButtonSetting(labelId, 'Join a room', 'joinRoomBtn', BingoClient.joinRoom);
+    const leaveRoomBtn = addButtonSetting(labelId, 'Leave Room', 'leaveRoomBtn', BingoClient.leaveRoom);
+    const startGameBtn = addButtonSetting(labelId, 'Start Game', 'startRoomBtn', BingoClient.startGame);
+    const restartGameBtn = addButtonSetting(labelId, 'Reset Board', 'restartGameBtn', BingoClient.restartGame);
+    const updateWholeBoardBtn = addButtonSetting(labelId, 'Refresh Board UI', 'updateWholeBoardBtn', BingoClient.updateWholeBoard);
+    const sendRecentRunBtn = addButtonSetting(labelId, 'Send Recent Goal Attempt (or press +)', 'sendRecentRunBtn', BingoClient.sendRecentRun);
+    const sendAllRunsBtn = addButtonSetting(labelId, 'Send All Attempted Goals', 'sendAllRunsBtn', BingoClient.sendAllRuns);
+
+    settingsContainer.append(connectToServerBtn);
+    settingsContainer.append(disconnectFromServerBtn);
+    settingsContainer.append(createRoomBtn);
+    settingsContainer.append(joinRoomBtn);
+    settingsContainer.append(leaveRoomBtn);
+    settingsContainer.append(startGameBtn);
+    settingsContainer.append(restartGameBtn);
+    settingsContainer.append(updateWholeBoardBtn);
+    settingsContainer.append(sendRecentRunBtn);
+    settingsContainer.append(sendAllRunsBtn);
+}
+
+function addBingoServerSettingsSave() {
+    console.log('Saving stuff will become a feature if people play, rn cba');
+}
+
+function addBingoServerSettings(div) {
+    addBingoSettingsTab(div, 'bingo-server-button', 'bingo-server-label', 'Bingo Server', addBingoServerSettingsLabels, addBingoServerSettingsSave);
+}
+
+// Bingo Client Settings
+function generateTeamsSelect() {
+    let teams = [];
+    TEAMS.forEach((team) => {
+        teams.push({ value: team, label: team })
+    })
+
+    return teams
+}
+
+function showAllTeamsMsg() {
+    Object.entries(BingoClient.current.teams).forEach(([teamName, teamList]) => {
+        let players = ""
+        teamList.forEach((player) => {
+            players += `${player}, `
+            
+        })
+
+        showMessage(`Team ${teamName}: ${players}`);
+    })
+}
+
+function findTeamSelectedIndex(currentTeam) {
+    let selectedIndex = -1;
+
+    TEAMS.forEach((team, index) => {
+        if (team === currentTeam) {
+            selectedIndex = index;
+        }
+    });
+
+    return selectedIndex;
+}
+
+function addBingoClientSettingsLabels(labelId) {
+    const settingsContainer = document.querySelector('.settings-container');
+
+    if (!settingsContainer) {
+        console.log('Settings container not found');
+        return;
+    }
+
+    const maxPlayerCountLabel = addSliderSetting(labelId, 'Max Player Count', 'max-player-count', 2, 10, 1);
+    const boardSizeLabel = addSliderSetting(labelId, 'Board Size', 'board-size', 3, 10, 1);
+    const teamLabel = addSelectSetting(labelId, 'Your Team', 'team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), BingoClient.changeTeam);
+    const showAllTeamsLabel = addButtonSetting(labelId, 'Show all Teams', 'showAllTeamsBtn', showAllTeamsMsg);
+    //const lockoutLabel = addCheckboxSetting(labelId, 'Lockout', 'lockout');
+
+    settingsContainer.append(maxPlayerCountLabel);
+    settingsContainer.append(boardSizeLabel);
+    settingsContainer.append(teamLabel);
+    settingsContainer.append(showAllTeamsLabel);
+    //settingsContainer.prepend(lockoutLabel);
+}
+
+function addBingoClientSettingsSave() {
+    console.log('Saving stuff will become a feature if people play, rn cba');
+}
+
+function addBingoClientSettings(div) {
+    addBingoSettingsTab(div, 'bingo-client-button', 'bingo-client-label', 'Bingo Client', addBingoClientSettingsLabels, addBingoClientSettingsSave);
+}
+
+// Detect settings popup
+
+const targetNode = document.body;
+const settingsObserver = new MutationObserver((mutationsList) => {
+    for (const mutation of mutationsList) {
+        if (mutation.type === 'childList') {
+            // Check if a new node with class "settings" is added
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('settings')) {
+                    node.childNodes[3].style.display = 'block'; // I think this looks better fr
+
+                    addBingoServerSettings(node);
+                    addBingoClientSettings(node);
+                }
+            });
+        }
+    }
+});
+// observer.disconnect();
+
+
+// Start things
+
+settingsObserver.observe(targetNode, { childList: true, subtree: true });
 addMessageHandler();
-//addBingoBoardUI(board);
+showMessage('Client working!!!')
