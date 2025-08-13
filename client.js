@@ -195,9 +195,7 @@ function connectToServer() {
 
     BingoClient.userId = self.name;
 
-    const server = location.hostname === 'localhost'
-        ? 'ws://localhost:10000'
-        : 'wss://evades-bingo.onrender.com';
+    const server = 'wss://evades-bingo.onrender.com';
 
     BingoClient.socket = new WebSocket(server);
 

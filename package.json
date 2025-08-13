@@ -11,6 +11,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "express": "^5.1.0",
+    "http": "^0.0.1-security",
     "ws": "^8.18.3"
   }
 }
