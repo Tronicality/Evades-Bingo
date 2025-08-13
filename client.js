@@ -13,10 +13,12 @@
 // @grant        none
 // ==/UserScript==
 'use strict';
-
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes;
 let bingoSaveData = { board: [], lastSave: {} };
+
+const server = 'https://evades-bingo.onrender.com/'
+
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
     "ERROR": "error",
@@ -101,7 +103,7 @@ function connectToServer() {
 
     BingoClient.userId = self.name;
 
-    BingoClient.socket = new WebSocket('ws://localhost:3000'); // Change to actual server
+    BingoClient.socket = new WebSocket(server);
 
     // Handle connection open
     BingoClient.socket.addEventListener('open', () => {
@@ -204,13 +206,22 @@ function connectToServer() {
 
     // Handle connection close
     BingoClient.socket.addEventListener('close', () => {
-        BingoClient.leaveRoom();
-        const msg = 'Disconnected from the server';
-        showMessage(msg)
-        console.log(msg);
+        //BingoClient.leaveRoom();
+        showMessage('Disconnected from the server')
+        console.log('Disconnected from the server');
 
         clearClient();
     });
+}
+
+function disconnectFromServer() {
+    if (BingoClient.socket) {
+        BingoClient.socket.close();
+    }
+    else {
+        showMessage('No active connection to disconnect');
+        console.log('No active connection to disconnect');
+    }
 }
 
 const CLIENT_MESSAGE_TYPES = {
@@ -229,6 +240,8 @@ function clearClient() {
     BingoClient.isConnected = false;
     BingoClient.inBingoGame = false;
     BingoClient.board = [];
+    BingoClient.roomId = null;
+    BingoClient.socket = null;
     clearBingoSaveData();
     hideBingoBoardUI();
 }
@@ -237,12 +250,12 @@ function sendData(type, data) {
     BingoClient.socket.send(JSON.stringify({ type: type, data: data }))
 }
 
-function createRoom(maxPlayerCount = 2) {
-    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { max_player_count: maxPlayerCount })
+function createRoom(team, maxPlayerCount) {
+    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount })
 }
 
-function joinRoom(roomId) {
-    sendData(CLIENT_MESSAGE_TYPES.JOIN_ROOM, { room_id: roomId })
+function joinRoom(roomId, team) {
+    sendData(CLIENT_MESSAGE_TYPES.JOIN_ROOM, { room_id: roomId, team: team })
 }
 
 function leaveRoom(roomId) {
@@ -283,7 +296,7 @@ window.BingoClient = {
     board: [],
     settings: {
         maxPlayerCount: 4,
-
+        team: 'red'
     },
     current: {
         maxPlayerCount: null,
@@ -292,6 +305,7 @@ window.BingoClient = {
     },
 
     connectToServer,
+    disconnectFromServer,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -305,11 +319,11 @@ window.BingoClient = {
 };
 
 BingoClient.createRoom = () => {
-    createRoom(BingoClient.settings.maxPlayerCount);
+    createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount);
 }
 
 BingoClient.joinRoom = () => {
-    joinRoom(BingoClient.roomId);
+    joinRoom(BingoClient.roomId, BingoClient.settings.team);
 }
 
 BingoClient.leaveRoom = () => {
@@ -325,21 +339,15 @@ BingoClient.restartGame = () => {
 }
 
 BingoClient.joinTeam = () => {
-    const team = prompt("Enter team name: ", 'red');
-    BingoClient.current.team = team;
-
-    joinTeam(BingoClient.roomId, BingoClient.current.team)
+    joinTeam(BingoClient.roomId, BingoClient.settings.team)
 }
 
 BingoClient.leaveTeam = () => {
-    leaveTeam(BingoClient.roomId, BingoClient.current.team)
+    leaveTeam(BingoClient.roomId, BingoClient.settings.team)
 }
 
 BingoClient.changeTeam = () => {
-    const team = prompt("Enter team name: ", 'red');
-    BingoClient.current.team = team;
-
-    changeTeam(BingoClient.roomId, BingoClient.current.team)
+    changeTeam(BingoClient.roomId, BingoClient.settings.team)
 }
 
 function updateBingoTeams() {
@@ -442,7 +450,7 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
     }
 }
 
-function regionNameFilter(currentRegion) {
+function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
     for (const [region, subRegions] of Object.entries(MULTIPLE_WIN_REGIONS)) {
         if (Object.values(subRegions).includes(currentRegion)) {
             return region;
@@ -470,10 +478,10 @@ function findCurrentCellAttempt() {
                 newRow = rowIndex;
                 newCol = colIndex;
                 found = true;
-                break; // Break out of the inner loop
+                break;
             }
         }
-        if (found) break; // Break out of the outer loop
+        if (found) break;
     }
 
     return [found, newRow, newCol];
@@ -482,11 +490,14 @@ function findCurrentCellAttempt() {
 function saveAttempt() {
     if (!self) return;
     if (self.areaNumber === 1 || self.survivalTime < 40) return;
-    if (!Number.isNaN(bingoSaveData.lastSave.areaNumber)) {
-        if (self.areaNumber <= bingoSaveData.lastSave.areaNumber && regionNameFilter(bingoSaveData.lastSave.region.name) === self.regionName && isPlayerAlive()) return;
+    if (!Number.isNaN(bingoSaveData.lastSave.areaNumber)) { // Don't enter if not started
+        if (self.areaNumber <= bingoSaveData.lastSave.areaNumber
+            && regionNameFilter(bingoSaveData.lastSave.region.name) === self.regionName
+            && isPlayerAlive()
+        ) return;
     }
 
-    // Check if still attempting
+    // Check if still attempting on a map with a better attempt
     let found, row, col;
     if (bingoSaveData.lastSave.region === null ||
         self.regionName !== bingoSaveData.lastSave.region ||
@@ -495,7 +506,7 @@ function saveAttempt() {
         [found, row, col] = findCurrentCellAttempt();
     }
 
-    if (found !== true) return;
+    if (found !== true) return; // false means player attempt not found on bingo board, undefined means that player has not started yet
     const currentCellData = bingoSaveData.board[row][col];
     const lastSave = bingoSaveData.lastSave
 
@@ -518,7 +529,7 @@ function saveAttempt() {
     Object.assign(lastSave, currentCellData);
 }
 
-function trackBingoProgress() {
+function trackBingoProgress() { // Being checked every frame
     if (!BingoClient.isConnected || !BingoClient.inBingoGame || !self) return;
 
     saveAttempt();
@@ -592,6 +603,8 @@ win.WebSocket = class extends win.WebSocket {
             if (args[0] == "message") {
                 args[1] = direct_proxy(args[1], (to, what, args) => {
                     const ret = to.apply(what, args);
+
+                    // Per frame
                     trackBingoProgress();
 
                     return ret;

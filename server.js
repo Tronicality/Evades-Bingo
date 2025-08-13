@@ -1,8 +1,7 @@
 // Server Logic
 const WebSocket = require('ws');
-//import WebSocket from "ws";
 
-const PORT = 3000;
+const PORT = process.env.PORT || 10000;
 const wss = new WebSocket.Server({ port: PORT });
 
 let roomPool = {};
@@ -159,11 +158,6 @@ function validateTeamRequest(data, ws) {
 
     if (!roomPool[data.room_id]) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.ROOM_NOT_FOUND);
-        return false;
-    }
-
-    if (!data.team) {
-        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.TEAM_NOT_FOUND);
         return false;
     }
 
@@ -358,6 +352,8 @@ function joinRoom(data, ws) {
     updateRoomActionTimer(room)
 
     room.players.push(ws);
+    joinTeam(data, ws);
+
     sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId });
     console.log(`User ${ws.id} joined room ${roomId}`);
 }
@@ -578,7 +574,7 @@ function makeMove(data, ws) {
     oldCell.marked_info.time = newCell.time;
     oldCell.marked_info.team = newCell.team;
 
-    console.log(`User ${ws.id} marked cell at (${newCell.row}, ${newCell.col}) in room ${roomId}`);
+    //console.log(`User ${ws.id} marked cell at (${newCell.row}, ${newCell.col}) in room ${roomId}`);
     if (checkBingo(room.board, data.cell.team)) {
         //console.log(`User ${ws.id} won in room ${roomId}`);
 
@@ -655,7 +651,7 @@ function leaveRoom(data, ws) {
         room.players.forEach(player => {
             sendData(player, SERVER_MESSAGES.TYPES.PLAYER_LEFT, { user_id: ws.id });
         });
-        console.log(`Remaining players notified in room ${roomId}`);
+        //console.log(`Remaining players notified in room ${roomId}`);
     }
 
     if (room.admin === ws.id) {
@@ -664,7 +660,7 @@ function leaveRoom(data, ws) {
             const newAdmin = room.players[0].id // Assign the first player as the new admin
             room.admin = newAdmin; 
             sendData(newAdmin, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
-            console.log(`New admin assigned: ${room.admin}`);
+            //console.log(`New admin assigned: ${room.admin}`);
         }
     }
 }
@@ -1027,6 +1023,6 @@ function checkBingo(board, team) {
 
 setInterval(() => {
     checkRoomRemoval();
-}, 60 * 1000)
+}, 5 * 60 * 1000)
 
-console.log(`WebSocket server is running on https://${process.env.PROJECT_DOMAIN || 'localhost'}:${PORT}`); 
+console.log(`WebSocket server is running on https://evades-bingo.onrender.com/:${PORT}`); 
