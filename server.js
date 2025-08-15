@@ -142,6 +142,7 @@ function registerUser(ws, userId) {
     userIds.add(userId);
     ws.id = userId; // Assign user ID to the WebSocket
     sendData(ws, SERVER_MESSAGES.TYPES.REGISTERED, { id: ws.id })
+    console.log(`User ${ws.id} registered`)
 }
 
 function generateStringPassword(length = 6) {
@@ -230,7 +231,6 @@ function joinTeam(data, ws, changeTeam = false) {
     if (!changeTeam) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.TEAM.JOINED);
         teamUpdate(room);
-        //sendData(ws, SERVER_MESSAGES.TYPES.UPDATE_TEAMS, { teams: room.teams });
     }
 }
 
@@ -254,7 +254,6 @@ function leaveTeam(data, ws, changeTeam = false) {
     if (!changeTeam) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.TEAM.LEFT);
         teamUpdate(room);
-        //sendData(ws, SERVER_MESSAGES.TYPES.UPDATE_TEAMS, { teams: room.teams });
     }
 }
 
@@ -268,7 +267,6 @@ function changeTeam(data, ws) {
 
     sendMessage(ws, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.TEAM.CHANGED);
     teamUpdate(room);
-    //sendData(ws, SERVER_MESSAGES.TYPES.UPDATE_TEAMS, { teams: room.teams });
 }
 
 function createTeams() {
@@ -277,7 +275,7 @@ function createTeams() {
         teamStorage[teamName] = [];
     })
 
-    return teamStorage; // { 'red': [], 'blue': [] }
+    return teamStorage; // e.g. { 'red': [], 'blue': [] }
 }
 
 function isPlayerInARoom(ws) {
@@ -370,7 +368,7 @@ function joinRoom(data, ws) {
     room.players.push(ws);
     joinTeam(data, ws);
 
-    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId });
+    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId, admin: room.admin });
     console.log(`User ${ws.id} joined room ${roomId}`);
 }
 
@@ -475,7 +473,7 @@ function restartGame(data, ws) {
         sendMessage(player, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.GAME.RESTARTED);
     });
 
-    console.log(`Game restarted in room ${roomId}`);
+    //console.log(`Game restarted in room ${roomId}`);
 }
 
 function findUserTeam(userId, room) {
@@ -591,12 +589,12 @@ function makeMove(data, ws) {
     oldCell.marked_info.team = findUserTeam(ws.id, room);
 
     //console.log(`User ${ws.id} marked cell at (${newCell.row}, ${newCell.col}) in room ${roomId}`);
-    if (checkBingo(room.board, data.cell.team)) {
+    if (checkBingo(room.board, oldCell.marked_info.team)) {
         //console.log(`User ${ws.id} won in room ${roomId}`);
 
         room.game_ended = true;
         room.players.forEach(player => {
-            sendData(player, SERVER_MESSAGES.TYPES.GAME_END, { winner: ws.id });
+            sendData(player, SERVER_MESSAGES.TYPES.GAME_END, { winner: oldCell.marked_info.team });
         });
     }
 
@@ -609,10 +607,12 @@ function makeMove(data, ws) {
 
 function findAndRemovePlayerFromRoom(userId) {
     let found = false;
-    Object.values(roomPool).forEach((room) => {
+    Object.entries(roomPool).forEach(([roomId, room]) => {
         const playerIndex = room.players.findIndex((ws) => ws.id === userId);
 
         if (playerIndex !== -1) {
+            leaveTeam({ room_id: roomId, team: findUserTeam(userId, room) }, ws);
+
             room.players.splice(playerIndex, 1);
             found = true;
         }
@@ -658,17 +658,13 @@ function leaveRoom(data, ws) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.LEFT_ROOM, SERVER_MESSAGES.ROOM.LEFT);
     }
 
-    //console.log(`User ${ws.id} left room ${roomId}`);
-
     if (room.players.length === 0) {
         removeRoom(roomId)
     } else {
         // Notify remaining players
         room.players.forEach(player => {
             sendData(player, SERVER_MESSAGES.TYPES.PLAYER_LEFT, { user_id: ws.id });
-            //sendData(player, SERVER_MESSAGES.TYPES.UPDATE_TEAMS, { teams: room.teams });
         });
-        //console.log(`Remaining players notified in room ${roomId}`);
     }
 
     if (room.admin === ws.id) {
@@ -676,8 +672,10 @@ function leaveRoom(data, ws) {
         if (room.players.length > 0) {
             const newAdmin = room.players[0].id // Assign the first player as the new admin
             room.admin = newAdmin;
-            sendData(newAdmin, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
-            //console.log(`New admin assigned: ${room.admin}`);
+
+            room.players.forEach(player => {
+                sendData(player, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
+            });
         }
     }
 }
@@ -818,8 +816,11 @@ const REGIONS = {
     "Lonely Laboratory": 40,
     "Ancient Abyss": 40,
     "Vast Void": 50,
+    "Pristine Purgatory": 20,
+    /*
     "Pristine Purgatory Eternal": 22,
     "Pristine Purgatory Veydris": 23,
+    */
 }
 
 const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end point
@@ -853,10 +854,12 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
         16: "Haunted Halls",
         25: "Haunted Halls Deep Woods"
     },
+    /*
     "Pristine Purgatory": {
         22: "Pristine Purgatory Eternal",
         23: "Pristine Purgatory Veydris",
     }
+    */
 }
 
 const HEROES = [
@@ -909,12 +912,6 @@ function generateRegion(usedRegions) {
     do {
         area = Object.keys(REGIONS)[randomNumber(Object.keys(REGIONS).length - 1)];
         areaNumber = REGIONS[area];
-
-        /*
-        if (MULTIPLE_WIN_REGIONS[area] && MULTIPLE_WIN_REGIONS[area][areaNumber]) {
-            area = MULTIPLE_WIN_REGIONS[area][areaNumber];
-        }
-        */
     } while (usedRegions.has(regionNameFilter(area)));
 
     usedRegions.add(regionNameFilter(area));
@@ -924,10 +921,12 @@ function generateRegion(usedRegions) {
 function generateHero(region) {
     let hero = HEROES[randomNumber(HEROES.length - 1)];
 
+    /*
     if (region.name.includes("Pristine Purgatory") && region.index === 23) {
         hero = "Veydris";
     }
-    else if (region.name.includes("Haunted Halls") && region.index === 25) {
+    */
+    if (region.name.includes("Haunted Halls") && region.index === 25) {
         hero = "Reaper";
     }
     else {
@@ -1053,8 +1052,11 @@ function checkBingo(board, team) {
 
 setInterval(() => {
     checkRoomRemoval();
+}, 5 * 60 * 1000);
+
+setInterval(() => {
     checkWebSockets();
-}, 2 * 60 * 1000)
+}, 30 * 1000)
 
 
 // ===== Start Server =====

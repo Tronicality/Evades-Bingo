@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    http://tampermonkey.net/
-// @version      0.0.1
-// @description  Br1h made evades bingo... no way!
+// @version      0.0.8
+// @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -14,7 +14,6 @@
 // ==/UserScript==
 'use strict';
 
-
 // Globals
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes;
@@ -22,11 +21,67 @@ let bingoSaveData = { board: [], lastSave: {} };
 const TEAMS = new Set(['red', 'green', 'blue']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
+    "ROOM_INFO": "room",
     "ERROR": "error",
     "UNKNOWN": "unknown",
     "WINNER": "winner",
 }
-
+const CLIENT_MESSAGE_TYPES = {
+    CREATE_ROOM: 'create_room',
+    START_GAME: 'start_game',
+    RESTART_GAME: 'restart_game',
+    JOIN_ROOM: 'join_room',
+    LEAVE_ROOM: 'leave_room',
+    MAKE_MOVE: 'make_move',
+    JOIN_TEAM: 'join_team',
+    LEAVE_TEAM: 'leave_team',
+    CHANGE_TEAM: 'change_team',
+}
+const SERVER_INFO_SCENES = { // Fake Enum :sob:
+    NOT_CONNECTED: 'not_connected',
+    CONNECTING: 'connecting',
+    CONNECTED: 'connected',
+    IN_ROOM: 'in_room',
+    GAME_STARTED: 'game_started',
+}
+const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end point
+    "Monumental Migration": {
+        120: "Monumental Migration 120",
+        480: "Monumental Migration 480"
+    },
+    "Magnetic Monopole": {
+        35: "Magnetic Monopole Dipole",
+        36: "Magnetic Monopole"
+    },
+    "Magnetic Monopole Hard": {
+        35: "Magnetic Monopole Dipole Hard",
+        36: "Magnetic Monopole Hard"
+    },
+    "Mysterious Mansion": {
+        59: "Mysterious Mansion Hedge", //Hat
+        60: "Mysterious Mansion Liminal",
+        61: "Mysterious Mansion Attic",
+        62: "Mysterious Mansion Cryptic" //Hero
+    },
+    "Peculiar Pyramid": {
+        29: "Peculiar Pyramid Inner",
+        31: "Peculiar Pyramid Perimeter"
+    },
+    "Peculiar Pyramid Hard": {
+        29: "Peculiar Pyramid Inner Hard",
+        31: "Peculiar Pyramid Perimeter Hard"
+    },
+    "Haunted Halls": {
+        16: "Haunted Halls",
+        25: "Haunted Halls Deep Woods"
+    },
+    /*
+    "Pristine Purgatory": {
+        22: "Pristine Purgatory Eternal",
+        23: "Pristine Purgatory Veydris",
+    }
+    */
+}
 
 // Utilities
 
@@ -99,92 +154,113 @@ function clearBingoSaveData() {
 
 function handleServerMessage(message) {
     switch (message.type) {
-            case 'registered':
-                console.log(`Registered with ID: ${message.data.id}`);
-                BingoClient.isConnected = true;
-                break;
-            case 'room_created':
-                showMessage(`Room created with ID: ${message.data.id}`)
-                console.log(`Room created with ID: ${message.data.id}`);
+        case 'registered':
+            console.log(`Registered with ID: ${message.data.id}`);
+            BingoClient.isConnected = true;
 
-                BingoClient.roomId = message.data.id;
-                break;
-            case 'room_joined':
-                showMessage('Joined Room')
-                console.log(`Joined room, ID: ${message.data.id}`);
-                break;
-            case 'left_room':
-                clearClient();
-                break;
-            case 'game_started':
-                showMessage('Game started!')
+            updateServerInformation(SERVER_INFO_SCENES.CONNECTED);
+            break;
+        case 'room_created':
+            showMessage(`Room created with ID: ${message.data.id}`);
+            console.log(`Room created with ID: ${message.data.id}`);
 
-                BingoClient.board = message.data.board;
+            BingoClient.roomId = message.data.id;
 
-                if (!BingoClient.hasBoardUI) {
-                    addBingoBoardUI(BingoClient.board);
-                }
-                else {
-                    updateWholeBoard();
-                }
+            updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
+            break;
+        case 'room_joined':
+            showMessage('Joined Room', MESSAGE_TYPES.ROOM_INFO)
+            console.log(`Joined room, ID: ${message.data.id}`);
 
-                showBingoBoardUI();
-                BingoClient.inBingoGame = true;
+            BingoClient.roomId = message.data.id;
+            BingoClient.admin = message.data.admin;
 
-                clearBingoSaveData();
-                createSaveDataReserves(message.data.board);
-                break;
-            case 'update_board':
-                //console.log('Board updated:', message.data.cell);
-                BingoClient.board[message.data.row][message.data.col] = message.data.cell;
-                updateBoard(message.data.cell, message.data.row, message.data.col);
+            updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
+            break;
+        case 'left_room':
+            showMessage(message.message, MESSAGE_TYPES.ROOM_INFO)
 
-                showBingoBoardUI();
-                break;
-            /*
-            case 'game_restarted':
-                console.log('Game restarted! Board:', message.data.board);
-                break;
-            */
-            case 'game_ended':
-                //console.log('Game ended! Winner:', message.data.winner);
-                showMessage(`Game Ended! Winner ${message.data.winner}`)
+            clearClient();
+            updateServerInformation(SERVER_INFO_SCENES.CONNECTED);
+            break;
+        case 'game_started':
+            BingoClient.board = message.data.board;
 
-                BingoClient.inBingoGame = false;
-                break;
-
-            case 'bingo':
-                showMessage(message.message, MESSAGE_TYPES.WINNER);
-                BingoClient.board = message.data.board;
+            if (!BingoClient.hasBoardUI) {
+                addBingoBoardUI(BingoClient.board);
+            }
+            else {
                 updateWholeBoard();
+            }
 
-                BingoClient.inBingoGame = false;
-                break;
-            case 'game_info':
-                showMessage(message.message);
-                console.log('Game info:', message.message);
-                break;
-            case 'mark_attempt':
-                showMessage(message.message);
-                console.log('Mark attempt:', message.message);
-                clearLastSave();
-                break;
-            case 'update_teams':
-                showMessage('Teams have been updated')
-                //console.log("New Teams:", message.data.teams)
+            showBingoBoardUI();
+            BingoClient.inBingoGame = true;
 
-                BingoClient.current.teams = message.data.teams;
-                updateBingoTeams();
-                break;
-            case 'error':
-                const msg = `Error: ${message.message}`
-                showMessage(msg, MESSAGE_TYPES.ERROR);
-                console.error(msg);
-                break;
-            default:
-                showMessage(`Something broke! Check Console!`, MESSAGE_TYPES.ERROR);
-                console.warn('Unknown message type:', message.type);
-        }
+            clearBingoSaveData();
+            updateServerInformation(SERVER_INFO_SCENES.GAME_STARTED);
+            createSaveDataReserves(message.data.board);
+            break;
+        case 'update_board':
+            //console.log('Board updated:', message.data.cell);
+            BingoClient.board[message.data.row][message.data.col] = message.data.cell;
+            updateBoard(message.data.cell, message.data.row, message.data.col);
+
+            showBingoBoardUI();
+            break;
+        /*
+        case 'game_restarted':
+            console.log('Game restarted! Board:', message.data.board);
+            break;
+        */
+        case 'game_ended':
+            //console.log('Game ended! Winner:', message.data.winner);
+            showMessage(`Game Ended!`);
+            showMessage(`Winning is Team ${message.data.winner}`, MESSAGE_TYPES.WINNER);
+
+            BingoClient.inBingoGame = false;
+            updateServerInformation(SERVER_INFO_SCENES.CONNECTED);
+            break;
+        /*
+        case 'bingo':
+            showMessage(message.message, MESSAGE_TYPES.WINNER);
+            BingoClient.board = message.data.board;
+            updateWholeBoard();
+
+            BingoClient.inBingoGame = false;
+            break;
+        */
+        case 'player_left':
+            showMessage(`Player ${message.data.user_id} left the room`);
+            break;
+        case 'new_admin':
+            showMessage(`New admin is: ${message.data.user_id}`);
+            BingoClient.current.admin = message.data.user_id;
+            break;
+        case 'game_info':
+            showMessage(message.message);
+            console.log('Game info:', message.message);
+            break;
+        case 'mark_attempt':
+            showMessage(message.message);
+            console.log('Mark attempt:', message.message);
+            clearLastSave();
+            break;
+        case 'update_teams':
+            showMessage('Teams have been updated')
+            //console.log("New Teams:", message.data.teams)
+
+            BingoClient.current.teams = message.data.teams;
+            updateBingoTeams();
+            break;
+        case 'error':
+            const msg = `Error: ${message.message}`
+            showMessage(msg, MESSAGE_TYPES.ERROR);
+            console.error(msg);
+            break;
+        default:
+            showMessage(`Something broke! Check Console!`, MESSAGE_TYPES.ERROR);
+            console.warn('Unknown message type:', message.type);
+    }
 }
 
 function connectToServer() {
@@ -213,34 +289,15 @@ function connectToServer() {
 
     // Handle connection close
     BingoClient.socket.addEventListener('close', () => {
-        //BingoClient.leaveRoom();
         showMessage('Disconnected from the server')
         console.log('Disconnected from the server');
 
+        updateServerInformation(SERVER_INFO_SCENES.NOT_CONNECTED);
+
         clearClient();
+        BingoClient.isConnected = false;
+        BingoClient.socket = null;
     });
-}
-
-const CLIENT_MESSAGE_TYPES = {
-    CREATE_ROOM: 'create_room',
-    START_GAME: 'start_game',
-    RESTART_GAME: 'restart_game',
-    JOIN_ROOM: 'join_room',
-    LEAVE_ROOM: 'leave_room',
-    MAKE_MOVE: 'make_move',
-    JOIN_TEAM: 'join_team',
-    LEAVE_TEAM: 'leave_team',
-    CHANGE_TEAM: 'change_team',
-}
-
-function clearClient() {
-    BingoClient.isConnected = false;
-    BingoClient.inBingoGame = false;
-    BingoClient.board = [];
-    BingoClient.roomId = null;
-    BingoClient.socket = null;
-    clearBingoSaveData();
-    hideBingoBoardUI();
 }
 
 function disconnectFromServer() {
@@ -253,11 +310,26 @@ function disconnectFromServer() {
     }
 }
 
+function clearClient() {
+    BingoClient.maxPlayerCount = null;
+    BingoClient.inBingoGame = false;
+    BingoClient.boardSize = null;
+    BingoClient.roomId = null;
+    BingoClient.admin = null;
+    BingoClient.team = null;
+    BingoClient.teams = {};
+    BingoClient.board = [];
+
+    clearBingoSaveData();
+    hideBingoBoardUI();
+}
+
 function sendData(type, data) {
     try {
         BingoClient.socket.send(JSON.stringify({ type: type, data: data }))
     } catch (error) {
         showMessage("Something Broke! Check console!", MESSAGE_TYPES.ERROR);
+        console.error(error.message);
     }
 }
 
@@ -307,12 +379,20 @@ window.BingoClient = {
     board: [],
     settings: {
         maxPlayerCount: 4,
+        boardSize: 5,
         team: 'red'
     },
     current: {
         maxPlayerCount: null,
-        team: 'red',
+        boardSize: null,
+        team: null,
         teams: {},
+        admin: null,
+        scene: SERVER_INFO_SCENES.NOT_CONNECTED,
+    },
+    bindings: {
+        sendRecentRun: null,
+        sendAllRuns: '+',
     },
 
     connectToServer,
@@ -330,6 +410,8 @@ window.BingoClient = {
 
 BingoClient.connectToServer = () => {
     showMessage('Connecting...');
+    updateServerInformation(SERVER_INFO_SCENES.CONNECTING);
+
     connectToServer();
 }
 
@@ -343,8 +425,7 @@ BingoClient.createRoom = () => {
 
 BingoClient.joinRoom = () => {
     const roomId = prompt('Enter room ID');
-    BingoClient.roomId = roomId;
-    joinRoom(BingoClient.roomId, BingoClient.settings.team);
+    joinRoom(roomId, BingoClient.settings.team);
 }
 
 BingoClient.leaveRoom = () => {
@@ -396,6 +477,7 @@ function findUserTeam(userId) {
 
 function updateBingoTeams() {
     BingoClient.current.team = findUserTeam(BingoClient.userId)
+    updateSettingsTeams()
     updateWholeBoard();
 }
 
@@ -456,43 +538,6 @@ function getHero(heroType) {
     }
 
     return Object.keys(heroes)[heroType]
-}
-
-const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end point
-    "Monumental Migration": {
-        120: "Monumental Migration 120",
-        480: "Monumental Migration 480"
-    },
-    "Magnetic Monopole": {
-        35: "Magnetic Monopole Dipole",
-        36: "Magnetic Monopole"
-    },
-    "Magnetic Monopole Hard": {
-        35: "Magnetic Monopole Dipole Hard",
-        36: "Magnetic Monopole Hard"
-    },
-    "Mysterious Mansion": {
-        59: "Mysterious Mansion Hedge", //Hat
-        60: "Mysterious Mansion Liminal",
-        61: "Mysterious Mansion Attic",
-        62: "Mysterious Mansion Cryptic" //Hero
-    },
-    "Peculiar Pyramid": {
-        29: "Peculiar Pyramid Inner",
-        31: "Peculiar Pyramid Perimeter"
-    },
-    "Peculiar Pyramid Hard": {
-        29: "Peculiar Pyramid Inner Hard",
-        31: "Peculiar Pyramid Perimeter Hard"
-    },
-    "Haunted Halls": {
-        16: "Haunted Halls",
-        25: "Haunted Halls Deep Woods"
-    },
-    "Pristine Purgatory": {
-        22: "Pristine Purgatory Eternal",
-        23: "Pristine Purgatory Veydris",
-    }
 }
 
 function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
@@ -663,12 +708,13 @@ win.WebSocket = class extends win.WebSocket {
 document.addEventListener('keydown', handleKey);
 
 function handleKey(e) {
-    if (e.key === "t") {
-        //console.log(state);
-        //console.log(self);
+    // Function callback shenanigans?
+
+    if (e.key === BingoClient.bindings.sendRecentRun) {
+        BingoClient.sendRecentRun();
     }
-    if (e.key === "+") {
-        makeMarkAttempt();
+    if (e.key === BingoClient.bindings.sendAllRuns) {
+        BingoClient.sendAllRuns();
     }
 }
 
@@ -687,6 +733,8 @@ function setMessageColor(msg, type) {
         case MESSAGE_TYPES.WINNER:
             msg.style.color = "#3d3";
             break;
+        case MESSAGE_TYPES.ROOM_INFO:
+            msg.style.color = "#33d";
         case MESSAGE_TYPES.DEFAULT:
         default:
             break;
@@ -921,7 +969,7 @@ function updateTeamCell(row, col) {
 }
 
 function updateBoard(targetCell, row, col) {
-    updateTeamCell(row, col);
+    //updateTeamCell(row, col); // Matches cell to player team even upon changes
     updateCellMiniBoard(targetCell, row, col);
     updateCellBigBoard(targetCell, row, col);
 }
@@ -971,7 +1019,7 @@ function addBingoBoardUI(board) {
     cssHTML.innerHTML = `.boards-wrapper {
     position: fixed;
     color:white;
-    top: 50%;
+    top: 35%;
     left: 2%;
     display: flex;
     align-items: flex-start;
@@ -1076,7 +1124,6 @@ function addBingoBoardUI(board) {
     miniBoardEl = document.getElementById('miniBoard');
     bigBoardEl = document.getElementById('bigBoard');
     tooltipEl = document.getElementById('tooltip');
-    //const boardsWrapper = document.getElementById('boardsWrapper');
     miniHoverArea = document.getElementById('miniHoverArea');
 
     miniHoverArea.addEventListener('mouseenter', showBigBoard);
@@ -1101,7 +1148,7 @@ function addBingoBoardUI(board) {
 
 
 // Settings Helpers
-function updateSettingsContainerDisplay(displayStyle, targetSubClass, filterBingo = false) {
+function updateSettingsContainerDisplay(displayStyle, targetSubClasses, filterBingo = false) {
     if (!displayStyle) return;
 
     const settingsContainer = document.querySelector('.settings-container');
@@ -1111,11 +1158,11 @@ function updateSettingsContainerDisplay(displayStyle, targetSubClass, filterBing
         return;
     }
 
-    if (targetSubClass) {
-        const subClass = settingsContainer.querySelectorAll(targetSubClass);
+    if (targetSubClasses) {
+        const subClass = settingsContainer.querySelectorAll(targetSubClasses);
 
         if (!subClass) {
-            console.log(`Sub Class ${targetSubClass} not found`)
+            console.log(`Sub Class ${targetSubClasses} not found`)
             return;
         }
 
@@ -1127,6 +1174,7 @@ function updateSettingsContainerDisplay(displayStyle, targetSubClass, filterBing
     }
     else {
         settingsContainer.childNodes.forEach((child) => {
+            if (!child.className) return;
             if (filterBingo && child.className.includes('bingo')) return;
 
             child.style.display = displayStyle;
@@ -1159,12 +1207,21 @@ function hideSettingsCategoryActive() {
     }
 }
 
-function addLabel(labelId, labelText) {
+function addLabel(labelAddedClass, labelText, labelId) {
+    if (!labelAddedClass || !labelText) {
+        console.log("Missing label params")
+        return;
+    }
+
     const label = document.createElement('label');
     label.style.display = 'none';
     label.classList.add('settings-label');
-    label.classList.add(labelId);
+    label.classList.add(labelAddedClass);
     //exampleLabel.setAttribute('for', 'example-bingo-setting');
+
+    if (labelId) {
+        label.id = labelId;
+    }
 
     const labelDiv = document.createElement('div');
     labelDiv.className = 'settings-setting';
@@ -1175,8 +1232,13 @@ function addLabel(labelId, labelText) {
     return label;
 }
 
-function addCheckboxSetting(labelId, labelText, checkboxId) {
-    const label = addLabel(labelId, labelText);
+function addCheckboxSetting(labelAddedClass, labelText, checkboxId) {
+    if (!labelAddedClass || !labelText || !checkboxId) {
+        console.log("Missing checkbox params")
+        return;
+    }
+
+    const label = addLabel(labelAddedClass, labelText);
     const labelDiv = label.querySelector('.settings-setting');
 
     const input = document.createElement('input');
@@ -1189,8 +1251,13 @@ function addCheckboxSetting(labelId, labelText, checkboxId) {
     return label;
 }
 
-function addSliderSetting(labelId, labelText, sliderId, min, max, step) {
-    const label = addLabel(labelId, labelText);
+function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, step, value = undefined) {
+    if (!labelAddedClass || !labelText || !sliderId || !min || !max || !step || !value) {
+        console.log("Missing slider params")
+        return;
+    }
+
+    const label = addLabel(labelAddedClass, labelText);
     const labelDiv = label.querySelector('.settings-setting');
 
     const input = document.createElement('input');
@@ -1200,6 +1267,7 @@ function addSliderSetting(labelId, labelText, sliderId, min, max, step) {
     input.min = min;
     input.max = max;
     input.step = step;
+    input.value = value;
 
     const valueDisplay = document.createElement('span');
     valueDisplay.textContent = `: ${input.value}`;
@@ -1214,13 +1282,19 @@ function addSliderSetting(labelId, labelText, sliderId, min, max, step) {
     return label;
 }
 
-function addSelectSetting(labelId, labelText, selectId, options, selectedIndex = 0, functionCallback = undefined) {
-    const label = addLabel(labelId, labelText);
+function addSelectSetting(labelAddedClass, labelText, selectId, options, selectedIndex = 0, functionCallback = undefined) {
+    if (!labelAddedClass || !labelText || !selectId || !options) {
+        console.log("Missing select params")
+        return;
+    }
+
+    const label = addLabel(labelAddedClass, labelText);
     const labelDiv = label.querySelector('.settings-setting');
 
     const input = document.createElement('select');
     input.className = 'settings-select';
     input.id = selectId; // Later Br1h realised, why did I add this as an ID???? why not class??? am i bugging????
+    // New br1h here that woke up, that guy b4 was coding at 3am, he was bugging
 
     for (const option of options) {
         const optionElement = document.createElement('option');
@@ -1242,8 +1316,20 @@ function addSelectSetting(labelId, labelText, selectId, options, selectedIndex =
     return label;
 }
 
-function addButtonSetting(labelId, labelText, buttonId, functionCallBack) {
-    const label = addLabel(labelId, labelText);
+function addButtonSetting(labelAddedClass, labelText, buttonId, functionCallBack, labelId) {
+    if (!labelAddedClass || !labelText || !buttonId) {
+        console.log("Missing Button params")
+        return;
+    }
+
+    let label;
+    if (labelId) {
+        label = addLabel(labelAddedClass, labelText, labelId);
+    }
+    else {
+        label = addLabel(labelAddedClass, labelText);
+    }
+
     const labelDiv = label.querySelector('.settings-setting');
 
     const input = document.createElement('button');
@@ -1259,7 +1345,34 @@ function addButtonSetting(labelId, labelText, buttonId, functionCallBack) {
     return label;
 }
 
-function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, saveButtonCallback) {
+function setKeyBinding(event, targetObj, keyName, labelId) {
+    const key = event.key;
+
+    if (key === 'Escape' || key === 'Enter' || key === "Backspace") {
+        targetObj[keyName] = null;
+    } else {
+        targetObj[keyName] = key;
+    }
+
+    showMessage(`Key binding set to: ${targetObj[keyName] || 'None'}`);
+
+    const labelDiv = document.querySelector(`#${labelId} .settings-setting`);
+    const textNode = Array.from(labelDiv.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+    textNode.textContent = textNode.textContent.replace(/\((.*?)\)/, `(${targetObj[keyName] || 'None'})`);
+}
+
+function setVariableKeyBind(targetObj, keyName, labelId) {
+    showMessage('Press a key to set the binding (Escape/Enter/Backspace will remove the binding).');
+
+    const handler = (event) => {
+        setKeyBinding(event, targetObj, keyName, labelId);
+        document.removeEventListener('keydown', handler);
+    };
+
+    document.addEventListener('keydown', handler);
+}
+
+function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, updateLabelsCallback, saveButtonCallback) {
     const settingsCategories = div.querySelector('.settings-categories');
 
     // Adding Tab Button
@@ -1277,6 +1390,7 @@ function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, sa
         // Show Bingo settings
         bingoButton.classList.add('active');
         updateSettingsContainerDisplay('block', `.${classLabel}`);
+        updateLabelsCallback()
     });
 
     settingsCategories.append(bingoButton);
@@ -1285,7 +1399,7 @@ function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, sa
 
     // Handling switching off Bingo Tab, bro i really thought it'd be free but it got so complicated
     settingsCategories.addEventListener('click', (event) => {
-        // If clicking on same button or empty space around it
+        // If clicking on same button or empty space around it or a different bingo tab
         if (event.target.id === id ||
             event.target.className.includes('settings-categories') ||
             (event.target.id !== id && event.target.id.includes('bingo'))
@@ -1308,7 +1422,87 @@ function addBingoSettingsTab(div, id, classLabel, tabText, addLabelsCallback, sa
 }
 
 // Bingo Server Settings
-function addBingoServerSettingsLabels(labelId) {
+function updateSettingsTeams() {
+    const teamInformationLabel = document.getElementById('teamInformationLabel')
+
+    if (!teamInformationLabel) return;
+    if (BingoClient.current.scene !== SERVER_INFO_SCENES.IN_ROOM) return 'No teams';
+
+    teamInformationLabel.textContent = '';
+
+    Object.entries(BingoClient.current.teams).forEach(([teamName, teamList]) => {
+        let players = ""
+        teamList.forEach((player) => {
+            players += `${player}, `
+
+        })
+
+        teamInformationLabel.textContent += `Team ${teamName}: [${players}] `;
+    })
+}
+
+function isSceneValid(givenScene) {
+    for (const scene of Object.values(SERVER_INFO_SCENES)) {
+        if (scene === givenScene) return true;
+    }
+    return false;
+}
+
+function updateServerInformation(scene) {
+    if (isSceneValid(scene)) BingoClient.current.scene = scene;
+    if (!document.getElementById('bingo-server-button').className.includes('active')) return 'Not Connected'; // Not Chosen Tab
+
+    const serverInfoLabel = document.getElementById('bingoServerInfo');
+
+    updateSettingsContainerDisplay('none');
+    serverInfoLabel.style.display = 'block';
+
+    switch (scene) {
+        case SERVER_INFO_SCENES.NOT_CONNECTED:
+            serverInfoLabel.textContent = 'Not Connected To Server.';
+
+            document.getElementById('connectToServerLabel').style.display = 'block';
+            document.getElementById('bingoServerWaitMsg').style.display = 'block';
+            break;
+        case SERVER_INFO_SCENES.CONNECTING:
+            serverInfoLabel.textContent = 'Connecting To Server...';
+
+            document.getElementById('bingoServerWaitMsg2').style.display = 'block';
+            break;
+        case SERVER_INFO_SCENES.CONNECTED:
+            serverInfoLabel.textContent = 'Connected To Server';
+
+            document.getElementById('createRoomLabel').style.display = 'block';
+            document.getElementById('joinRoomLabel').style.display = 'block';
+            document.getElementById('disconnectFromServerLabel').style.display = 'block';
+            break;
+        case SERVER_INFO_SCENES.IN_ROOM:
+            serverInfoLabel.textContent = `RoomId: ${BingoClient.roomId}, Admin: ${BingoClient.admin}`;
+
+            document.getElementById('startGameLabel').style.display = 'block';
+            document.getElementById('restartGameLabel').style.display = 'block';
+            document.getElementById('leaveRoomLabel').style.display = 'block';
+            document.getElementById('disconnectFromServerLabel').style.display = 'block';
+            break;
+        case SERVER_INFO_SCENES.GAME_STARTED:
+            serverInfoLabel.textContent = `RoomId: ${BingoClient.roomId}, Admin: ${BingoClient.admin}`;
+
+            document.getElementById('restartGameLabel').style.display = 'block';
+            document.getElementById('refreshBoardLabel').style.display = 'block';
+            document.getElementById('sendRecentRunLabel').style.display = 'block';
+            document.getElementById('sendAllRunsLabel').style.display = 'block';
+            document.getElementById('leaveRoomLabel').style.display = 'block';
+            document.getElementById('disconnectFromServerLabel').style.display = 'block';
+        default:
+            break;
+    }
+}
+
+function updateBingoServerSettingsLabels() {
+    updateServerInformation(BingoClient.current.scene);
+}
+
+function addBingoServerSettingsLabels(labelAddedClass) {
     const settingsContainer = document.querySelector('.settings-container');
 
     if (!settingsContainer) {
@@ -1316,35 +1510,35 @@ function addBingoServerSettingsLabels(labelId) {
         return;
     }
 
-    const connectToServerBtn = addButtonSetting(labelId, 'Connect to Server', 'connectToServerBtn', BingoClient.connectToServer);
-    const disconnectFromServerBtn = addButtonSetting(labelId, 'Disconnect from server', 'disconnectFromServerBtn', BingoClient.disconnectFromServer)
-    const createRoomBtn = addButtonSetting(labelId, 'Create Room', 'createRoomBtn', BingoClient.createRoom);
-    const joinRoomBtn = addButtonSetting(labelId, 'Join a room', 'joinRoomBtn', BingoClient.joinRoom);
-    const leaveRoomBtn = addButtonSetting(labelId, 'Leave Room', 'leaveRoomBtn', BingoClient.leaveRoom);
-    const startGameBtn = addButtonSetting(labelId, 'Start Game', 'startRoomBtn', BingoClient.startGame);
-    const restartGameBtn = addButtonSetting(labelId, 'Reset Board', 'restartGameBtn', BingoClient.restartGame);
-    const updateWholeBoardBtn = addButtonSetting(labelId, 'Refresh Board UI', 'updateWholeBoardBtn', BingoClient.updateWholeBoard);
-    const sendRecentRunBtn = addButtonSetting(labelId, 'Send Recent Goal Attempt (or press +)', 'sendRecentRunBtn', BingoClient.sendRecentRun);
-    const sendAllRunsBtn = addButtonSetting(labelId, 'Send All Attempted Goals', 'sendAllRunsBtn', BingoClient.sendAllRuns);
+    const fragment = document.createDocumentFragment();
 
-    settingsContainer.append(connectToServerBtn);
-    settingsContainer.append(disconnectFromServerBtn);
-    settingsContainer.append(createRoomBtn);
-    settingsContainer.append(joinRoomBtn);
-    settingsContainer.append(leaveRoomBtn);
-    settingsContainer.append(startGameBtn);
-    settingsContainer.append(restartGameBtn);
-    settingsContainer.append(updateWholeBoardBtn);
-    settingsContainer.append(sendRecentRunBtn);
-    settingsContainer.append(sendAllRunsBtn);
+    const elements = [
+        addLabel(labelAddedClass, updateServerInformation(), 'bingoServerInfo'),
+        addLabel(labelAddedClass, '(If ID already on server and not connected, wait 30 seconds)', 'bingoServerWaitMsg'),
+        addLabel(labelAddedClass, '(Give the server time to turn on)', 'bingoServerWaitMsg2'),
+        addButtonSetting(labelAddedClass, 'Connect to Server', 'connectToServerBtn', BingoClient.connectToServer, 'connectToServerLabel'),
+        addButtonSetting(labelAddedClass, 'Create Room', 'createRoomBtn', BingoClient.createRoom, 'createRoomLabel'),
+        addButtonSetting(labelAddedClass, 'Join a room', 'joinRoomBtn', BingoClient.joinRoom, 'joinRoomLabel'),
+        addButtonSetting(labelAddedClass, 'Start Game', 'startGameBtn', BingoClient.startGame, 'startGameLabel'),
+        addButtonSetting(labelAddedClass, 'Reset Board', 'restartGameBtn', BingoClient.restartGame, 'restartGameLabel'),
+        addButtonSetting(labelAddedClass, 'Send Recent Goal Attempt', 'sendRecentRunBtn', BingoClient.sendRecentRun, 'sendRecentRunLabel'),
+        addButtonSetting(labelAddedClass, 'Send All Attempted Goals', 'sendAllRunsBtn', BingoClient.sendAllRuns, 'sendAllRunsLabel'),
+        addButtonSetting(labelAddedClass, 'Refresh Board UI', 'updateWholeBoardBtn', BingoClient.updateWholeBoard, 'refreshBoardLabel'),
+        addButtonSetting(labelAddedClass, 'Leave Room', 'leaveRoomBtn', BingoClient.leaveRoom, 'leaveRoomLabel'),
+        addButtonSetting(labelAddedClass, 'Disconnect from server', 'disconnectFromServerBtn', BingoClient.disconnectFromServer, 'disconnectFromServerLabel'),
+
+    ];
+
+    fragment.append(...elements);
+    settingsContainer.appendChild(fragment);
 }
 
 function addBingoServerSettingsSave() {
-    console.log('Saving stuff will become a feature if people play, rn cba');
+    console.log('Saving stuff will become a feature if people play');
 }
 
 function addBingoServerSettings(div) {
-    addBingoSettingsTab(div, 'bingo-server-button', 'bingo-server-label', 'Bingo Server', addBingoServerSettingsLabels, addBingoServerSettingsSave);
+    addBingoSettingsTab(div, 'bingo-server-button', 'bingo-server-label', 'Bingo Server', addBingoServerSettingsLabels, updateBingoServerSettingsLabels, addBingoServerSettingsSave);
 }
 
 // Bingo Client Settings
@@ -1362,7 +1556,7 @@ function showAllTeamsMsg() {
         let players = ""
         teamList.forEach((player) => {
             players += `${player}, `
-            
+
         })
 
         showMessage(`Team ${teamName}: ${players}`);
@@ -1381,7 +1575,22 @@ function findTeamSelectedIndex(currentTeam) {
     return selectedIndex;
 }
 
-function addBingoClientSettingsLabels(labelId) {
+function updateBingoClientSettingsLabels() {
+    if (updateSettingsTeams() !== 'No teams') return;
+    document.getElementById('teamInformationLabel').style.display = 'none';
+}
+
+function handleTeamSelectLabel(newTeam) {
+    if (BingoClient.isConnected && BingoClient.roomId !== null) {
+        BingoClient.current.team = newTeam;
+        BingoClient.changeTeam(newTeam);
+    }
+    else {
+        BingoClient.settings.team = newTeam;
+    }
+}
+
+function addBingoClientSettingsLabels(labelAddedClass) {
     const settingsContainer = document.querySelector('.settings-container');
 
     if (!settingsContainer) {
@@ -1389,25 +1598,35 @@ function addBingoClientSettingsLabels(labelId) {
         return;
     }
 
-    const maxPlayerCountLabel = addSliderSetting(labelId, 'Max Player Count', 'max-player-count', 2, 10, 1);
-    const boardSizeLabel = addSliderSetting(labelId, 'Board Size', 'board-size', 3, 10, 1);
-    const teamLabel = addSelectSetting(labelId, 'Your Team', 'team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), BingoClient.changeTeam);
-    const showAllTeamsLabel = addButtonSetting(labelId, 'Show all Teams', 'showAllTeamsBtn', showAllTeamsMsg);
-    //const lockoutLabel = addCheckboxSetting(labelId, 'Lockout', 'lockout');
+    const fragment = document.createDocumentFragment();
 
-    settingsContainer.append(maxPlayerCountLabel);
-    settingsContainer.append(boardSizeLabel);
-    settingsContainer.append(teamLabel);
-    settingsContainer.append(showAllTeamsLabel);
-    //settingsContainer.prepend(lockoutLabel);
+    const elements = [
+        addLabel(labelAddedClass, 'No teams', 'teamInformationLabel'),
+        ...(BingoClient.isConnected && BingoClient.roomId !== null
+            ? [
+                //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.current.maxPlayerCount),
+                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.current.boardSize),
+                addSelectSetting(labelAddedClass, 'Your Team (currently broken)', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), handleTeamSelectLabel),
+            ]
+            : [
+                //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.settings.maxPlayerCount),
+                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.settings.boardSize),
+                addSelectSetting(labelAddedClass, 'Your Team (currently broken)', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.settings.team), handleTeamSelectLabel),
+            ]),
+        addButtonSetting(labelAddedClass, `Send Recent Run Button Keybind (${BingoClient.bindings.sendRecentRun || 'None'})`, 'sendRecentRunKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendRecentRun', 'sendRecentRunKeybindLabel'); }, 'sendRecentRunKeybindLabel'),
+        addButtonSetting(labelAddedClass, `Send All Runs Button Keybind (${BingoClient.bindings.sendAllRuns || 'None'})`, 'sendAllRunsKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendAllRuns', 'sendAllRunsKeybindLabel'); }, 'sendAllRunsKeybindLabel'),
+    ];
+
+    fragment.append(...elements);
+    settingsContainer.appendChild(fragment);
 }
 
 function addBingoClientSettingsSave() {
-    console.log('Saving stuff will become a feature if people play, rn cba');
+    console.log('Saving stuff will become a feature if people play');
 }
 
 function addBingoClientSettings(div) {
-    addBingoSettingsTab(div, 'bingo-client-button', 'bingo-client-label', 'Bingo Client', addBingoClientSettingsLabels, addBingoClientSettingsSave);
+    addBingoSettingsTab(div, 'bingo-client-button', 'bingo-client-label', 'Bingo Client', addBingoClientSettingsLabels, updateBingoClientSettingsLabels, addBingoClientSettingsSave);
 }
 
 // Detect settings popup
