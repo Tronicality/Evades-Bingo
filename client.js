@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    http://tampermonkey.net/
-// @version      0.0.8
+// @version      0.0.9
 // @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -16,8 +16,9 @@
 
 // Globals
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes;
+let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes, hb;
 let bingoSaveData = { board: [], lastSave: {} };
+const LS_KEY = 'evbingo:settings';
 const TEAMS = new Set(['red', 'green', 'blue']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
@@ -162,15 +163,14 @@ function handleServerMessage(message) {
             break;
         case 'room_created':
             showMessage(`Room created with ID: ${message.data.id}`);
-            console.log(`Room created with ID: ${message.data.id}`);
 
             BingoClient.roomId = message.data.id;
+            BingoClient.admin = BingoClient.userId;
 
             updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
             break;
         case 'room_joined':
             showMessage('Joined Room', MESSAGE_TYPES.ROOM_INFO)
-            console.log(`Joined room, ID: ${message.data.id}`);
 
             BingoClient.roomId = message.data.id;
             BingoClient.admin = message.data.admin;
@@ -201,7 +201,6 @@ function handleServerMessage(message) {
             createSaveDataReserves(message.data.board);
             break;
         case 'update_board':
-            //console.log('Board updated:', message.data.cell);
             BingoClient.board[message.data.row][message.data.col] = message.data.cell;
             updateBoard(message.data.cell, message.data.row, message.data.col);
 
@@ -213,7 +212,6 @@ function handleServerMessage(message) {
             break;
         */
         case 'game_ended':
-            //console.log('Game ended! Winner:', message.data.winner);
             showMessage(`Game Ended!`);
             showMessage(`Winning is Team ${message.data.winner}`, MESSAGE_TYPES.WINNER);
 
@@ -234,20 +232,17 @@ function handleServerMessage(message) {
             break;
         case 'new_admin':
             showMessage(`New admin is: ${message.data.user_id}`);
-            BingoClient.current.admin = message.data.user_id;
+            BingoClient.admin = message.data.user_id;
             break;
         case 'game_info':
             showMessage(message.message);
-            console.log('Game info:', message.message);
             break;
         case 'mark_attempt':
             showMessage(message.message);
-            console.log('Mark attempt:', message.message);
             clearLastSave();
             break;
         case 'update_teams':
             showMessage('Teams have been updated')
-            //console.log("New Teams:", message.data.teams)
 
             BingoClient.current.teams = message.data.teams;
             updateBingoTeams();
@@ -264,33 +259,29 @@ function handleServerMessage(message) {
 }
 
 function connectToServer() {
-    if (!self) {
-        showMessage('Please enter a server on evades')
-        return;
-    }
-
-    BingoClient.userId = self.name;
+    if (!self) { showMessage('Please enter a server on evades'); return; }
 
     const server = 'wss://evades-bingo.onrender.com';
+    const ws = new WebSocket(server);
 
-    BingoClient.socket = new WebSocket(server);
+    BingoClient.socket = ws;
+    BingoClient.userId = self.name;
 
-    // Handle connection open
-    BingoClient.socket.addEventListener('open', () => {
-        showMessage('Connected to the server')
-        BingoClient.socket.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
+    ws.addEventListener('open', () => {
+        showMessage('Connected to the server');
+        hb = setInterval(()=> sendData('ping', Date.now()), 2 * 60 * 1000);
+        ws.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
     });
 
-    // Handle incoming messages
-    BingoClient.socket.addEventListener('message', (event) => {
-        const message = JSON.parse(event.data);
-        handleServerMessage(message);
+    ws.addEventListener('message', (event) => {
+        try { handleServerMessage(JSON.parse(event.data)); }
+        catch (e) { console.error('Bad WS message', e); showMessage("Something Broke! Check Console!", MESSAGE_TYPES.ERROR); }
     });
 
-    // Handle connection close
-    BingoClient.socket.addEventListener('close', () => {
-        showMessage('Disconnected from the server')
-        console.log('Disconnected from the server');
+    ws.addEventListener('close', () => {
+        showMessage('Disconnected from the server');
+
+        clearInterval(hb);
 
         updateServerInformation(SERVER_INFO_SCENES.NOT_CONNECTED);
 
@@ -373,6 +364,7 @@ window.BingoClient = {
     socket: null,
     userId: null,
     roomId: null,
+    admin: null,
     isConnected: false,
     inBingoGame: false,
     hasBoardUI: false,
@@ -387,7 +379,6 @@ window.BingoClient = {
         boardSize: null,
         team: null,
         teams: {},
-        admin: null,
         scene: SERVER_INFO_SCENES.NOT_CONNECTED,
     },
     bindings: {
@@ -462,6 +453,20 @@ BingoClient.sendRecentRun = () => {
 
 BingoClient.sendAllRuns = () => {
     attemptMarkEachCell();
+}
+
+function saveSettings() {
+    localStorage.setItem(LS_KEY, JSON.stringify({ settings: BingoClient.settings, bindings: BingoClient.bindings }));
+}
+
+function loadSettings() {
+    try {
+        const s = JSON.parse(localStorage.getItem(LS_KEY));
+        if (s) {
+            Object.assign(BingoClient.settings, s.settings || {});
+            Object.assign(BingoClient.bindings, s.bindings || {});
+        }
+    } catch { }
 }
 
 function findUserTeam(userId) {
@@ -579,7 +584,7 @@ function findCurrentCellAttempt() {
 
 function saveAttempt() {
     if (!self) return;
-    if (self.areaNumber === 1 || self.survivalTime < 40) return;
+    if (self.areaNumber <= 5 || self.survivalTime < 40) return;
     if (!Number.isNaN(bingoSaveData.lastSave.areaNumber)) { // Don't enter if not started
         if (self.areaNumber <= bingoSaveData.lastSave.areaNumber
             && regionNameFilter(bingoSaveData.lastSave.region.name) === self.regionName
@@ -815,7 +820,7 @@ function addMessageHandler() {
 
 // Bingo Board UI
 
-
+/*
 function updateMiniHoverArea() {
     const rect = miniBoardEl.getBoundingClientRect();
 
@@ -828,6 +833,17 @@ function updateMiniHoverArea() {
 
     miniHoverArea.style.top = `${miniBoardEl.offsetTop}px`;
     miniHoverArea.style.left = `${miniBoardEl.offsetLeft}px`;
+}
+*/
+
+function updateMiniHoverArea() {
+  const rect = miniBoardEl.getBoundingClientRect();
+  const extra = 20;
+  miniHoverArea.style.position = 'fixed';
+  miniHoverArea.style.top  = `${rect.top}px`;
+  miniHoverArea.style.left = `${rect.left}px`;
+  miniHoverArea.style.width  = `${rect.width + extra}px`;
+  miniHoverArea.style.height = `${rect.height + extra}px`;
 }
 
 function addTeamClass(div, cell) {
@@ -872,8 +888,9 @@ function addMarkedInfo(div, cell) {
 }
 
 function addTooltipInfo(div, cell) {
-    // Tooltip events (extra info on hover)
-    div.addEventListener('mouseenter', (e) => {
+    // Tooltip events
+
+    const onEnter = (e) => {
         tooltipEl.innerHTML = `
                     <strong>${cell.game_info.region.name}</strong><br>
                     Hero: ${cell.game_info.hero || 'N/A'}<br>
@@ -885,16 +902,21 @@ function addTooltipInfo(div, cell) {
                 : 'Not marked'}
                 `;
         tooltipEl.style.opacity = '1';
-    });
-
-    div.addEventListener('mousemove', (e) => {
+    };
+    const onMove = (e) => {
         tooltipEl.style.left = e.pageX + 15 + 'px';
         tooltipEl.style.top = e.pageY + 15 + 'px';
-    });
-
-    div.addEventListener('mouseleave', () => {
+    };
+    const onLeave = () => {
         tooltipEl.style.opacity = '0';
-    });
+    };
+
+    div.addEventListener('mouseenter', onEnter);
+    div.addEventListener('mousemove', onMove);
+    div.addEventListener('mouseleave', onLeave);
+    div._tipHandlers?.forEach(([t, fn]) => div.removeEventListener(t, fn));
+    div._tipHandlers = [['mouseenter', onEnter], ['mousemove', onMove], ['mouseleave', onLeave]];
+    div._tipHandlers.forEach(([t, fn]) => div.addEventListener(t, fn));
 }
 
 function createBigBoard(boardData, element) {
@@ -943,20 +965,13 @@ function updateMarkedInfo(div, cell) {
     hero.textContent = `Hero: ${cell.game_info.hero || 'N/A'}`;
 }
 
-function updateTooltipInfo(div, cell) {
-    div.removeEventListener('mouseenter', () => { });
-    div.removeEventListener('mousemove', () => { });
-    div.removeEventListener('mouseleave', () => { });
-    addTooltipInfo(div, cell);
-}
-
 function updateCellBigBoard(targetCell, row, col) {
     const div = document.getElementById(`big-cell-${row}-${col}`);
     if (!div) return;
 
     updateTeamClass(div, targetCell)
     updateMarkedInfo(div, targetCell)
-    updateTooltipInfo(div, targetCell)
+    addTooltipInfo(div, targetCell)
 }
 
 function updateTeamCell(row, col) {
@@ -1182,18 +1197,6 @@ function updateSettingsContainerDisplay(displayStyle, targetSubClasses, filterBi
     }
 }
 
-function updateOtherBingoSettingsDisplays(div, targetId, displayStyle) {
-    if (!div || !targetId || !displayStyle) return;
-
-    const bingoLabels = settingsCategories.querySelectorAll('label[id*="bingo"]');
-    bingoLabels.forEach(label => {
-        if (label.id !== targetId) {
-            //const otherClassLabel = button.id.replace('-button', '-label');
-            updateSettingsContainerDisplay('none', `.${otherClassLabel}`);
-        }
-    });
-}
-
 function hideSettingsCategoryActive() {
     const settingsCategories = document.querySelector('.settings-categories');
     if (!settingsCategories) {
@@ -1252,7 +1255,7 @@ function addCheckboxSetting(labelAddedClass, labelText, checkboxId) {
 }
 
 function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, step, value = undefined) {
-    if (!labelAddedClass || !labelText || !sliderId || !min || !max || !step || !value) {
+    if (!labelAddedClass || !labelText || !sliderId || !min || !max || !step || (!value && value !== 0)) {
         console.log("Missing slider params")
         return;
     }
@@ -1322,14 +1325,7 @@ function addButtonSetting(labelAddedClass, labelText, buttonId, functionCallBack
         return;
     }
 
-    let label;
-    if (labelId) {
-        label = addLabel(labelAddedClass, labelText, labelId);
-    }
-    else {
-        label = addLabel(labelAddedClass, labelText);
-    }
-
+    const label = addLabel(labelAddedClass, labelText, labelId);
     const labelDiv = label.querySelector('.settings-setting');
 
     const input = document.createElement('button');
@@ -1426,16 +1422,12 @@ function updateSettingsTeams() {
     const teamInformationLabel = document.getElementById('teamInformationLabel')
 
     if (!teamInformationLabel) return;
-    if (BingoClient.current.scene !== SERVER_INFO_SCENES.IN_ROOM) return 'No teams';
+    if (!(BingoClient.current.scene === SERVER_INFO_SCENES.IN_ROOM || BingoClient.current.scene === SERVER_INFO_SCENES.GAME_STARTED)) return 'No teams';
 
     teamInformationLabel.textContent = '';
 
     Object.entries(BingoClient.current.teams).forEach(([teamName, teamList]) => {
-        let players = ""
-        teamList.forEach((player) => {
-            players += `${player}, `
-
-        })
+        const players = teamList.join(', ') || '—';
 
         teamInformationLabel.textContent += `Team ${teamName}: [${players}] `;
     })
@@ -1493,6 +1485,7 @@ function updateServerInformation(scene) {
             document.getElementById('sendAllRunsLabel').style.display = 'block';
             document.getElementById('leaveRoomLabel').style.display = 'block';
             document.getElementById('disconnectFromServerLabel').style.display = 'block';
+            break;
         default:
             break;
     }
@@ -1534,7 +1527,7 @@ function addBingoServerSettingsLabels(labelAddedClass) {
 }
 
 function addBingoServerSettingsSave() {
-    console.log('Saving stuff will become a feature if people play');
+    saveSettings();
 }
 
 function addBingoServerSettings(div) {
@@ -1606,12 +1599,12 @@ function addBingoClientSettingsLabels(labelAddedClass) {
             ? [
                 //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.current.maxPlayerCount),
                 //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.current.boardSize),
-                addSelectSetting(labelAddedClass, 'Your Team (currently broken)', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), handleTeamSelectLabel),
+                addSelectSetting(labelAddedClass, 'Your Team', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), handleTeamSelectLabel),
             ]
             : [
                 //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.settings.maxPlayerCount),
                 //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.settings.boardSize),
-                addSelectSetting(labelAddedClass, 'Your Team (currently broken)', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.settings.team), handleTeamSelectLabel),
+                addSelectSetting(labelAddedClass, 'Your Team', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.settings.team), handleTeamSelectLabel),
             ]),
         addButtonSetting(labelAddedClass, `Send Recent Run Button Keybind (${BingoClient.bindings.sendRecentRun || 'None'})`, 'sendRecentRunKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendRecentRun', 'sendRecentRunKeybindLabel'); }, 'sendRecentRunKeybindLabel'),
         addButtonSetting(labelAddedClass, `Send All Runs Button Keybind (${BingoClient.bindings.sendAllRuns || 'None'})`, 'sendAllRunsKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendAllRuns', 'sendAllRunsKeybindLabel'); }, 'sendAllRunsKeybindLabel'),
@@ -1622,7 +1615,7 @@ function addBingoClientSettingsLabels(labelAddedClass) {
 }
 
 function addBingoClientSettingsSave() {
-    console.log('Saving stuff will become a feature if people play');
+    saveSettings();
 }
 
 function addBingoClientSettings(div) {
@@ -1651,7 +1644,11 @@ const settingsObserver = new MutationObserver((mutationsList) => {
 
 
 // Start things
+function evadesBingoInit() {
+    addMessageHandler();
+    showMessage('Client working!!!');
+    loadSettings();
+    settingsObserver.observe(targetNode, { childList: true, subtree: true });
+}
 
-settingsObserver.observe(targetNode, { childList: true, subtree: true });
-addMessageHandler();
-showMessage('Client working!!!')
+window.addEventListener('DOMContentLoaded', evadesBingoInit);

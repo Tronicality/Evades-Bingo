@@ -611,7 +611,7 @@ function findAndRemovePlayerFromRoom(userId) {
         const playerIndex = room.players.findIndex((ws) => ws.id === userId);
 
         if (playerIndex !== -1) {
-            leaveTeam({ room_id: roomId, team: findUserTeam(userId, room) }, ws);
+            leaveTeam({ room_id: roomId, team: findUserTeam(userId, room) }, room.players[playerIndex]);
 
             room.players.splice(playerIndex, 1);
             found = true;
