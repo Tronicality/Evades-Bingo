@@ -86,6 +86,8 @@ function heartbeat() {
     this.isAlive = true;
 }
 
+// ===== Server Logic =====
+
 wss.on('connection', (ws) => {
     ws.isAlive = true;
     ws.on('pong', heartbeat);
@@ -93,7 +95,7 @@ wss.on('connection', (ws) => {
     console.log(`${ws.id || "Client"} connected`);
 
     ws.on('message', (message) => {
-        handleMessage(JSON.parse(message), ws);
+        handleMessage(JSON.parse(sanitiseData(message)), ws);
     });
 
     ws.on('close', () => {
@@ -190,7 +192,7 @@ function isPlayerInTeam(room, ws, isJoining = true) {
     let found = false;
 
     Object.values(room.teams).forEach((teamList) => {
-        const teamIndex = teamList.findIndex((userId) => userId === ws.id);
+        const teamIndex = teamList.indexOf(ws.id);
 
         if (teamIndex === -1) return;
         found = true;
@@ -244,7 +246,7 @@ function leaveTeam(data, ws, changeTeam = false) {
     if (!isPlayerInTeam(room, ws, false)) return;
 
     Object.entries(room.teams).forEach(([teamName, teamList]) => {
-        const playerIndex = teamList.findIndex(playerId => playerId === ws.id);
+        const playerIndex = teamList.indexOf(ws.id);
 
         if (playerIndex === -1) return;
 
@@ -680,7 +682,48 @@ function leaveRoom(data, ws) {
     }
 }
 
+function sanitiseData(message) {
+    // ITS ALL AI, I JUST WANTED TO RUN IT ONCE :SOB: LEARNING COMES AFTER
+
+    // WebSocket messages may arrive as Buffer, ArrayBuffer, string, or Buffer[]
+    let raw;
+
+    if (Buffer.isBuffer(message)) {
+        raw = message.toString('utf8');
+    }
+    else if (Array.isArray(message)) {
+        raw = Buffer.concat(message).toString('utf8');
+    }
+    else if (message instanceof ArrayBuffer) {
+        raw = Buffer.from(message).toString('utf8');
+    }
+    else {
+        raw = String(message);
+    }
+
+    // Prevent oversized payloads
+    const MAX_MESSAGE_LENGTH = 10_000;
+    if (raw.length > MAX_MESSAGE_LENGTH) {
+        throw new Error('Message too large');
+    }
+
+    // Remove null bytes and non-printable control chars
+    // Keep common whitespace chars used in JSON: \n \r \t
+    raw = raw.replaceAll(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+
+    // Trim outer whitespace
+    raw = raw.trim();
+
+    if (!raw) {
+        throw new Error('Empty message');
+    }
+
+    return raw;
+}
+
 function handleMessage(message, ws) {
+    console.log(`type: ${message.type}, data: ${message.data} `);
+
     switch (message.type) {
         case 'register':
             registerUser(ws, message.data.user_id);
@@ -740,7 +783,7 @@ function checkWebSockets() {
 
 function checkRoomRemoval() {
     const roomsToRemove = [];
-    const TIMER = 600 * 1000 // 10 mins
+    const TIMER = 15 * 60 * 1000 // 10 mins
 
     Object.entries(roomPool).forEach(([id, room]) => {
         const currentTime = Date.now();
@@ -753,8 +796,7 @@ function checkRoomRemoval() {
     roomsToRemove.forEach((id) => removeRoom(id));
 }
 
-// Game Logic
-
+// ===== Game Logic =====
 
 const DEFAULT_BOARD_SIZE = 5;
 const REGIONS = {

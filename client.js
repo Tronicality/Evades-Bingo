@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
-// @namespace    http://tampermonkey.net/
-// @version      0.0.9
+// @namespace    https://github.com/Tronicality/Evades-Bingo
+// @version      0.1.0
 // @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -14,7 +14,14 @@
 // ==/UserScript==
 'use strict';
 
-// Globals
+/* TODO
+Guys this is a hotfix
+- Security (0.1.1)
+- Update Server Rules (0.1.1)
+- Add back rest of options (0.1.1)
+*/
+
+// ===== Global Variables =====
 let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes, hb;
 let bingoSaveData = { board: [], lastSave: {} };
@@ -84,7 +91,7 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
     */
 }
 
-// Utilities
+// ===== Utilities =====
 
 
 function isPlayerAlive() {
@@ -103,6 +110,7 @@ function getHeroColors() {
     }
     catch (e) {
         // window.heroConfig doesn't exist
+        console.warn("heroConfig doesn't exist: ", e.message)
         return {
             "Magmax": "#ff0000",
             "Rime": "#3377ff",
@@ -186,11 +194,11 @@ function handleServerMessage(message) {
         case 'game_started':
             BingoClient.board = message.data.board;
 
-            if (!BingoClient.hasBoardUI) {
-                addBingoBoardUI(BingoClient.board);
+            if (BingoClient.hasBoardUI) {
+                updateWholeBoard();
             }
             else {
-                updateWholeBoard();
+                addBingoBoardUI(BingoClient.board);
             }
 
             showBingoBoardUI();
@@ -258,10 +266,14 @@ function handleServerMessage(message) {
     }
 }
 
+function sanitiseData() {
+    // eh...
+}
+
 function connectToServer() {
     if (!self) { showMessage('Please enter a server on evades'); return; }
 
-    const server = 'wss://evades-bingo.onrender.com';
+    const server = 'wss://evades-bingo.onrender.com'; //'http://localhost:10000'
     const ws = new WebSocket(server);
 
     BingoClient.socket = ws;
@@ -274,7 +286,10 @@ function connectToServer() {
     });
 
     ws.addEventListener('message', (event) => {
-        try { handleServerMessage(JSON.parse(event.data)); }
+        try {
+            //sanitiseData(event.data)
+            handleServerMessage(JSON.parse(event.data));
+        }
         catch (e) { console.error('Bad WS message', e); showMessage("Something Broke! Check Console!", MESSAGE_TYPES.ERROR); }
     });
 
@@ -471,7 +486,7 @@ function loadSettings() {
 
 function findUserTeam(userId) {
     for (const [teamName, teamList] of Object.entries(BingoClient.current.teams)) {
-        const playerIndex = teamList.findIndex((playerId) => playerId === userId);
+        const playerIndex = teamList.indexOf(userId);
 
         if (playerIndex === -1) continue;
         return teamName
@@ -660,7 +675,7 @@ const direct_proxy = (func, app) => new Proxy(func, { apply: app });
 
 proxy(Object.prototype, "hasOwnProperty", (to, what, args) => {
     const nameArray = nameMap.get(what);
-    if (nameArray && nameArray.includes(args[0])) {
+    if (nameArray?.includes(args[0])) {
         return true;
     }
     return to.apply(what, args);
@@ -674,15 +689,6 @@ const get = (name, cb) => {
         return to;
     });
 };
-
-/*
-override("globalEntities", function () {
-    return this._globalEntities;
-}, function (to) {
-    if (!(to instanceof Array)) state = this;
-    return this._globalEntities = to;
-});
-*/
 
 override("self", function () {
     return this._self;
@@ -740,6 +746,7 @@ function setMessageColor(msg, type) {
             break;
         case MESSAGE_TYPES.ROOM_INFO:
             msg.style.color = "#33d";
+            break;
         case MESSAGE_TYPES.DEFAULT:
         default:
             break;
@@ -820,22 +827,6 @@ function addMessageHandler() {
 
 // Bingo Board UI
 
-/*
-function updateMiniHoverArea() {
-    const rect = miniBoardEl.getBoundingClientRect();
-
-    miniHoverArea.style.width = `${rect.width}px`;
-
-    // Extend downward by extra pixels so the pointer stays inside
-    const extraPadding = 20;
-    miniHoverArea.style.height = `${rect.height + extraPadding}px`;
-    miniHoverArea.style.width = `${rect.width + extraPadding}px`;
-
-    miniHoverArea.style.top = `${miniBoardEl.offsetTop}px`;
-    miniHoverArea.style.left = `${miniBoardEl.offsetLeft}px`;
-}
-*/
-
 function updateMiniHoverArea() {
   const rect = miniBoardEl.getBoundingClientRect();
   const extra = 20;
@@ -891,18 +882,40 @@ function addTooltipInfo(div, cell) {
     // Tooltip events
 
     const onEnter = (e) => {
-        tooltipEl.innerHTML = `
-                    <strong>${cell.game_info.region.name}</strong><br>
-                    Hero: ${cell.game_info.hero || 'N/A'}<br>
-                    ${cell.marked_info.is_marked
-                ? `Marked by: ${cell.marked_info.player || 'Unknown'}<br>
-                           Team: ${cell.marked_info.team || 'None'}<br>
-                           Time: ${cell.marked_info.time || 'N/A'}<br>
-                           Area Number: ${cell.marked_info.reached_index || 'N/A'}`
-                : 'Not marked'}
-                `;
-        tooltipEl.style.opacity = '1';
+        const { game_info, marked_info } = cell;
+
+        tooltipEl.replaceChildren();
+
+        // mini sanitizer, i should do a full update in the future lol...
+        const addLine = (label, value, strong = false) => {
+            const line = document.createElement("div");
+
+            if (strong) {
+                const s = document.createElement("strong");
+                s.textContent = value ?? "N/A";
+                line.appendChild(s);
+            } else {
+                line.textContent = `${label}${value ?? "N/A"}`;
+            }
+
+            tooltipEl.appendChild(line);
+        };
+
+        addLine("", game_info?.region?.name, true);
+        addLine("Hero: ", game_info?.hero || "N/A");
+
+        if (marked_info?.is_marked) {
+            addLine("Marked by: ", marked_info.player || "Unknown");
+            addLine("Team: ", marked_info.team || "None");
+            addLine("Time: ", marked_info.time || "N/A");
+            addLine("Area Number: ", marked_info.reached_index || "N/A");
+        } else {
+            addLine("", "Not marked");
+        }
+
+        tooltipEl.style.opacity = "1";
     };
+
     const onMove = (e) => {
         tooltipEl.style.left = e.pageX + 15 + 'px';
         tooltipEl.style.top = e.pageY + 15 + 'px';
