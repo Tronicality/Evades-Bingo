@@ -385,7 +385,7 @@ window.BingoClient = {
     hasBoardUI: false,
     board: [],
     settings: {
-        maxPlayerCount: 4,
+        maxPlayerCount: 20,
         boardSize: 5,
         team: 'red'
     },

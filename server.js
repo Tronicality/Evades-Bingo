@@ -95,7 +95,12 @@ wss.on('connection', (ws) => {
     console.log(`${ws.id || "Client"} connected`);
 
     ws.on('message', (message) => {
-        handleMessage(JSON.parse(sanitiseData(message)), ws);
+        if (!isDataSafe(message)){
+            handleMessage(JSON.parse({type: "UNSAFE"}), ws);
+        }
+        else {
+            handleMessage(JSON.parse(message), ws);
+        }
     });
 
     ws.on('close', () => {
@@ -450,11 +455,6 @@ function validateGameRestart(room, ws) { // I know this is the same function as 
         return false;
     }
 
-    if (room.game_started) {
-        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.GAME_ALREADY_STARTED);
-        return false;
-    }
-
     return true;
 }
 
@@ -467,11 +467,12 @@ function restartGame(data, ws) {
     updateRoomActionTimer(room)
 
     room.board = generateBoard(DEFAULT_BOARD_SIZE);
-    room.game_started = false;
+    room.game_started = true;
     room.game_ended = false;
 
     room.players.forEach(player => {
         //sendData(player, SERVER_MESSAGES.TYPES.GAME_RESTARTED, { board: room.board });
+        sendData(player, SERVER_MESSAGES.TYPES.GAME_STARTED, { board: room.board });
         sendMessage(player, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.GAME.RESTARTED);
     });
 
@@ -682,43 +683,94 @@ function leaveRoom(data, ws) {
     }
 }
 
-function sanitiseData(message) {
-    // ITS ALL AI, I JUST WANTED TO RUN IT ONCE :SOB: LEARNING COMES AFTER
+function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === '[object Object]';
+}
 
-    // WebSocket messages may arrive as Buffer, ArrayBuffer, string, or Buffer[]
-    let raw;
+function hasUnsafeKeys(value, depth = 0, maxDepth = 20) {
+    if (depth > maxDepth) return true;
 
-    if (Buffer.isBuffer(message)) {
-        raw = message.toString('utf8');
-    }
-    else if (Array.isArray(message)) {
-        raw = Buffer.concat(message).toString('utf8');
-    }
-    else if (message instanceof ArrayBuffer) {
-        raw = Buffer.from(message).toString('utf8');
-    }
-    else {
-        raw = String(message);
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            if (hasUnsafeKeys(item, depth + 1, maxDepth)) return true;
+        }
+        return false;
     }
 
-    // Prevent oversized payloads
-    const MAX_MESSAGE_LENGTH = 10_000;
-    if (raw.length > MAX_MESSAGE_LENGTH) {
-        throw new Error('Message too large');
+    if (!isPlainObject(value)) {
+        return false;
     }
 
-    // Remove null bytes and non-printable control chars
-    // Keep common whitespace chars used in JSON: \n \r \t
-    raw = raw.replaceAll(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+    for (const key of Object.keys(value)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+            return true;
+        }
 
-    // Trim outer whitespace
-    raw = raw.trim();
-
-    if (!raw) {
-        throw new Error('Empty message');
+        if (hasUnsafeKeys(value[key], depth + 1, maxDepth)) {
+            return true;
+        }
     }
 
-    return raw;
+    return false;
+}
+
+function isDataSafe(message) {
+    const MAX_MESSAGE_SIZE = 10 * 1024; // 10 KB
+
+    try {
+        if (message === null || message === undefined) {
+            return false;
+        }
+
+        let raw;
+
+        if (Buffer.isBuffer(message)) {
+            if (message.length > MAX_MESSAGE_SIZE) return false;
+            raw = message.toString('utf8');
+        } else if (typeof message === 'string') {
+            if (Buffer.byteLength(message, 'utf8') > MAX_MESSAGE_SIZE) return false;
+            raw = message;
+        } else {
+            return false;
+        }
+
+        const parsed = JSON.parse(raw);
+
+        if (!isPlainObject(parsed)) {
+            return false;
+        }
+
+        if (typeof parsed.type !== 'string' || parsed.type.trim() === '') {
+            return false;
+        }
+
+        if ('data' in parsed) {
+            const dataType = typeof parsed.data;
+            const validData =
+                parsed.data === null ||
+                dataType === 'string' ||
+                dataType === 'number' ||
+                dataType === 'boolean' ||
+                Array.isArray(parsed.data) ||
+                isPlainObject(parsed.data);
+
+            if (!validData) {
+                return false;
+            }
+
+            if (hasUnsafeKeys(parsed.data)) {
+                return false;
+            }
+        }
+
+        if (hasUnsafeKeys(parsed)) {
+            return false;
+        }
+
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function handleMessage(message, ws) {
@@ -754,6 +806,9 @@ function handleMessage(message, ws) {
             break;
         case 'change_team':
             changeTeam(message.data, ws);
+            break;
+        case 'UNSAFE':
+            sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, 'Unsafe or invalid message received');
             break;
         default:
             console.error('Unknown message type:', message.type);
@@ -813,8 +868,10 @@ const REGIONS = {
     "Dusty Depths": 20,
     "Elite Expanse": 80,
     "Elite Expanse Hard": 80,
+    /*
     "Endless Echo": 0,
     "Endless Echo Hard": 0,
+    */
     "Frozen Fjord": 40,
     "Frozen Fjord Hard": 40,
     "Glacial Gorge": 40,
