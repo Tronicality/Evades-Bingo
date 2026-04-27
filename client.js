@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.0
+// @version      0.1.1
 // @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -16,9 +16,9 @@
 
 /* TODO
 Guys this is a hotfix
-- Security (0.1.1)
-- Update Server Rules (0.1.1)
-- Add back rest of options (0.1.1)
+- Security (0.1.x)
+- Update Server Rules (0.1.x)
+- Add back rest of options (0.1.x)
 */
 
 // ===== Global Variables =====
@@ -205,8 +205,9 @@ function handleServerMessage(message) {
             BingoClient.inBingoGame = true;
 
             clearBingoSaveData();
-            updateServerInformation(SERVER_INFO_SCENES.GAME_STARTED);
             createSaveDataReserves(message.data.board);
+            updateServerInformation(SERVER_INFO_SCENES.GAME_STARTED);
+            
             break;
         case 'update_board':
             BingoClient.board[message.data.row][message.data.col] = message.data.cell;
@@ -552,12 +553,12 @@ function createSaveDataReserves(board) {
     bingoSaveData.lastSave = { region: null, hero: null, time: null, areaNumber: null, row: null, col: null, }
 }
 
-function getHero(heroType) {
+function getHero() {
     if (!heroes) {
         heroes = getHeroColors();
     }
 
-    return Object.keys(heroes)[heroType]
+    return Object.entries(heroes).find(([_, color]) => color === self.color)?.[0];
 }
 
 function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
@@ -570,31 +571,26 @@ function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
 }
 
 function findCurrentCellAttempt() {
-    let found = false;
-    let newRow, newCol;
-
     for (let rowIndex = 0; rowIndex < BingoClient.board.length; rowIndex++) {
         const row = BingoClient.board[rowIndex];
         for (let colIndex = 0; colIndex < row.length; colIndex++) {
             const cell = row[colIndex];
             const { hero, region } = cell.game_info;
 
-            if ((hero === getHero(self.heroType) || hero === "ANY") && regionNameFilter(region.name) === self.regionName) {
+            if ((hero === getHero() || hero === "ANY") && regionNameFilter(region.name) === self.regionName) {
+                // Found cell user is attempting
+
                 const currentCellData = bingoSaveData.board[rowIndex][colIndex]
                 currentCellData.row = rowIndex;
                 currentCellData.col = colIndex;
                 currentCellData.region = region.name;
 
-                newRow = rowIndex;
-                newCol = colIndex;
-                found = true;
-                break;
+                return [true, rowIndex, colIndex];
             }
         }
-        if (found) break;
     }
 
-    return [found, newRow, newCol];
+    return [false, null, null];
 }
 
 function saveAttempt() {
@@ -632,7 +628,7 @@ function saveAttempt() {
     showMessage(`Saving Data: Region: ${self.regionName}, Time: ${self.survivalTime}, Area: ${self.areaNumber}`);
 
     //currentCellData.region = self.regionName;
-    currentCellData.hero = getHero(self.heroType);
+    currentCellData.hero = getHero();
     currentCellData.time = self.survivalTime;
     currentCellData.areaNumber = self.areaNumber;
 
@@ -640,8 +636,11 @@ function saveAttempt() {
 }
 
 function trackBingoProgress() { // Being checked every frame
+    if (self){
+        console.log(`Hero[${self.color}]: ${getHero()}`)
+    }
+        
     if (!BingoClient.isConnected || !BingoClient.inBingoGame || !self) return;
-
     saveAttempt();
 
     //makeMarkAttempt()
