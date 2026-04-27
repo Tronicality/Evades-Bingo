@@ -1018,23 +1018,17 @@ function generateRegion(usedRegions) {
 }
 
 function generateHero(region) {
+    return "ANY";
+    /*
     let hero = HEROES[randomNumber(HEROES.length - 1)];
 
     /*
-    if (region.name.includes("Pristine Purgatory") && region.index === 23) {
-        hero = "Veydris";
-    }
-    */
-    if (region.name.includes("Haunted Halls") && region.index === 25) {
-        hero = "Reaper";
-    }
-    else {
-        if (randomNumber(2) === 0) {
-            hero = "ANY";
-        }
+    if (randomNumber(2) === 0) {
+        hero = "ANY";
     }
 
     return hero;
+    */
 }
 
 function generateGoal(usedRegions) {
