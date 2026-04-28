@@ -59,6 +59,7 @@ const SERVER_MESSAGES = {
         RESTARTED: 'Game has been restarted!',
     },
     MARK: {
+        HALF: 'You have not beaten atleast half of the area',
         AREA: 'Cell already marked with a better area number',
         TIME: 'Cell already marked with a better time earlier',
     },
@@ -541,9 +542,18 @@ function validateMakeMove(room, ws, cell) { // again in future i'll redo validat
     return true;
 }
 
+function getHalfAreaNumber(regionName, divisible = 2) {
+    if (!Number.isInteger(divisible) || divisible <= 0) divisible = 2;
+
+    const areaNumber = REGIONS[regionName];
+
+    return Math.floor(areaNumber / divisible)
+
+}
+
 function canMarkCell(oldCell, newCell, ws) {
+    //const targetCell = room.board[cell.row][cell.col];
     /* // Lockout moment
-    const targetCell = room.board[cell.row][cell.col];
     if (targetCell.marked_info.is_marked) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.RULES.CELL_ALREADY_MARKED);
         return false;
@@ -554,19 +564,30 @@ function canMarkCell(oldCell, newCell, ws) {
         return true;
     }
 
+    // Player tryna cheat
     if (newCell.time < minMarkAttemptTime) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.RULES.MIN_TIME);
-        return false; // Player tryna cheat
+        return false;
     }
 
+    /*
+    // Player hasn't beaten half the map
+    if (newCell.marked_info.reached_index < getHalfAreaNumber(targetCell.game_info.region)) {
+        sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.MARK.HALF)
+        return false;
+    }
+        */
+
+    // Player has not beaten other player area max
     if (newCell.index < oldCell.marked_info.reached_index) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.MARK.AREA);
-        return false; // Player has not beaten other player area max
+        return false;
     }
 
+    // Player has not beaten other player time
     if (newCell.time >= oldCell.marked_info.time && newCell.index === oldCell.marked_info.reached_index) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.MARK.TIME);
-        return false; // Player has not beaten other player time
+        return false;
     }
 
     return true;
@@ -774,14 +795,16 @@ function isDataSafe(message) {
 }
 
 function handleMessage(message, ws) {
-    console.log(`type: ${message.type}, data: ${message.data} `);
-
+    //console.log(`${ws.id} sent [type: ${message.type}]`);
+    
     switch (message.type) {
-        case 'register':
-            registerUser(ws, message.data.user_id);
+        case 'ping':
             break;
         case 'make_move':
             makeMove(message.data, ws);
+            break;
+        case 'register':
+            registerUser(ws, message.data.user_id);
             break;
         case 'create_room':
             createRoom(message.data, ws);
@@ -838,7 +861,7 @@ function checkWebSockets() {
 
 function checkRoomRemoval() {
     const roomsToRemove = [];
-    const TIMER = 15 * 60 * 1000 // 10 mins
+    const TIMER = 15 * 60 * 1000 // 15 mins
 
     Object.entries(roomPool).forEach(([id, room]) => {
         const currentTime = Date.now();
@@ -916,10 +939,6 @@ const REGIONS = {
     "Ancient Abyss": 40,
     "Vast Void": 50,
     "Pristine Purgatory": 20,
-    /*
-    "Pristine Purgatory Eternal": 22,
-    "Pristine Purgatory Veydris": 23,
-    */
 }
 
 const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end point
@@ -953,12 +972,6 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
         16: "Haunted Halls",
         25: "Haunted Halls Deep Woods"
     },
-    /*
-    "Pristine Purgatory": {
-        22: "Pristine Purgatory Eternal",
-        23: "Pristine Purgatory Veydris",
-    }
-    */
 }
 
 const HEROES = [
@@ -1018,17 +1031,7 @@ function generateRegion(usedRegions) {
 }
 
 function generateHero(region) {
-    return "ANY";
-    /*
-    let hero = HEROES[randomNumber(HEROES.length - 1)];
-
-    /*
-    if (randomNumber(2) === 0) {
-        hero = "ANY";
-    }
-
-    return hero;
-    */
+    return (randomNumber(2) === 0) ? "ANY" : HEROES[randomNumber(HEROES.length - 1)]
 }
 
 function generateGoal(usedRegions) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.1
+// @version      0.1.2
 // @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -113,7 +113,7 @@ function getHeroColors() {
         console.warn("heroConfig doesn't exist: ", e.message)
         return {
             "Magmax": "#ff0000",
-            "Rime": "#3377ff",
+            "Rime":  "#3333ff", //"#3377ff",
             "Morfe": "#00dd00",
             "Aurora": "#ff7f00",
             "Necro": "#FF00FF",
@@ -122,7 +122,7 @@ function getHeroColors() {
             "Shade": "#826565",
             "Euclid": "#5e4d66",
             "Chrono": "#00b270",
-            "Reaper": "#787b81",
+            "Reaper":  "#424a59", //"#787b81",
             "Rameses": "#989b4a",
             "Jolt": "#e1e100",
             "Ghoul": "#bad7d8",
@@ -267,10 +267,6 @@ function handleServerMessage(message) {
     }
 }
 
-function sanitiseData() {
-    // eh...
-}
-
 function connectToServer() {
     if (!self) { showMessage('Please enter a server on evades'); return; }
 
@@ -282,7 +278,7 @@ function connectToServer() {
 
     ws.addEventListener('open', () => {
         showMessage('Connected to the server');
-        hb = setInterval(()=> sendData('ping', Date.now()), 2 * 60 * 1000);
+        hb = setInterval(()=> sendData('ping', Date.now()), 30 * 1000);
         ws.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
     });
 
@@ -554,9 +550,14 @@ function createSaveDataReserves(board) {
 }
 
 function getHero() {
-    if (!heroes) {
+    if (!heroes)
         heroes = getHeroColors();
-    }
+
+    // TSMOD switch statement does not work between strokeColor and foregroundColor
+    if (self.color === "#3377ff" || self.color === "#3333ff")
+        return "Rime";
+    else if (self.color === "#424a59" || self.color === "#787b81")
+        return "Reaper";
 
     return Object.entries(heroes).find(([_, color]) => color === self.color)?.[0];
 }
@@ -636,10 +637,6 @@ function saveAttempt() {
 }
 
 function trackBingoProgress() { // Being checked every frame
-    if (self){
-        console.log(`Hero[${self.color}]: ${getHero()}`)
-    }
-        
     if (!BingoClient.isConnected || !BingoClient.inBingoGame || !self) return;
     saveAttempt();
 
@@ -1230,13 +1227,11 @@ function addLabel(labelAddedClass, labelText, labelId) {
 
     const label = document.createElement('label');
     label.style.display = 'none';
-    label.classList.add('settings-label');
-    label.classList.add(labelAddedClass);
+    label.classList.add('settings-label', labelAddedClass);
     //exampleLabel.setAttribute('for', 'example-bingo-setting');
 
-    if (labelId) {
+    if (labelId)
         label.id = labelId;
-    }
 
     const labelDiv = document.createElement('div');
     labelDiv.className = 'settings-setting';
@@ -1454,7 +1449,8 @@ function isSceneValid(givenScene) {
 
 function updateServerInformation(scene) {
     if (isSceneValid(scene)) BingoClient.current.scene = scene;
-    if (!document.getElementById('bingo-server-button').className.includes('active')) return 'Not Connected'; // Not Chosen Tab
+    if (document.getElementById('bingo-server-button') === null) return; // Settings is not open
+    if (!document.getElementById('bingo-server-button').className.includes('active')) return 'just not null'; // Not Chosen Tab or connected
 
     const serverInfoLabel = document.getElementById('bingoServerInfo');
 
