@@ -876,7 +876,7 @@ function checkRoomRemoval() {
 
 // ===== Game Logic =====
 
-const DEFAULT_BOARD_SIZE = 5;
+const DEFAULT_BOARD_SIZE = 3;
 const REGIONS = {
     "Burning Bunker": 36,
     "Burning Bunker Hard": 36,
