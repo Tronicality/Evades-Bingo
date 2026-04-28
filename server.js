@@ -17,7 +17,7 @@ app.get('/', (req, res) => {
 let roomPool = {};
 let userIds = new Set([]);
 const minMarkAttemptTime = 40; // seconds
-const TEAMS = new Set(['red', 'green', 'blue']);
+const TEAMS = new Set(['red', 'green', 'blue', 'orange']);
 
 const SERVER_MESSAGES = {
     TYPES: {
@@ -327,7 +327,7 @@ function createRoom(data, ws) {
         teams: createTeams(),
         //mode: data.mode,
         //lockout: false,
-        board: generateBoard(DEFAULT_BOARD_SIZE),
+        board: generateBoard(data.board_size),
         max_player_count: data.max_player_count || 2,
         game_started: false,
         game_ended: false,
@@ -337,7 +337,7 @@ function createRoom(data, ws) {
     };
 
     data.room_id = roomId;
-    data.team = (data.team) ? data.team : 'red';
+    data.team = (data.team === null || data.team === undefined) ? 'red' : data.team;
 
     joinTeam(data, ws);
 
@@ -425,7 +425,7 @@ function startGame(data, ws) {
     updateRoomActionTimer(room)
 
     room.game_started = true;
-    //room.board = generateBoard(DEFAULT_BOARD_SIZE);
+    //room.board = generateBoard(data.board_size);
     room.game_ended = false;
     room.players.forEach(player => {
         sendData(player, SERVER_MESSAGES.TYPES.GAME_STARTED, { board: room.board });
@@ -467,7 +467,7 @@ function restartGame(data, ws) {
 
     updateRoomActionTimer(room)
 
-    room.board = generateBoard(DEFAULT_BOARD_SIZE);
+    room.board = generateBoard(data.board_size);
     room.game_started = true;
     room.game_ended = false;
 
@@ -547,12 +547,13 @@ function getHalfAreaNumber(regionName, divisible = 2) {
 
     const areaNumber = REGIONS[regionName];
 
+    if (areaNumber > 40)
+        return 20
     return Math.floor(areaNumber / divisible)
-
 }
 
-function canMarkCell(oldCell, newCell, ws) {
-    //const targetCell = room.board[cell.row][cell.col];
+function canMarkCell(room, oldCell, newCell, ws) {
+    const targetCell = room.board[newCell.row][newCell.col];
     /* // Lockout moment
     if (targetCell.marked_info.is_marked) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.RULES.CELL_ALREADY_MARKED);
@@ -570,13 +571,11 @@ function canMarkCell(oldCell, newCell, ws) {
         return false;
     }
 
-    /*
     // Player hasn't beaten half the map
     if (newCell.marked_info.reached_index < getHalfAreaNumber(targetCell.game_info.region)) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.MARK.HALF)
         return false;
     }
-        */
 
     // Player has not beaten other player area max
     if (newCell.index < oldCell.marked_info.reached_index) {
@@ -604,7 +603,7 @@ function makeMove(data, ws) {
 
     updateRoomActionTimer(room)
 
-    if (!canMarkCell(oldCell, newCell, ws)) return;
+    if (!canMarkCell(room, oldCell, newCell, ws)) return;
 
     oldCell.marked_info.is_marked = true;
     oldCell.marked_info.player = ws.id;
@@ -876,7 +875,6 @@ function checkRoomRemoval() {
 
 // ===== Game Logic =====
 
-const DEFAULT_BOARD_SIZE = 3;
 const REGIONS = {
     "Burning Bunker": 36,
     "Burning Bunker Hard": 36,

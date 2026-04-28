@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.3
-// @description  Evades bingo... no way!
+// @version      0.1.4
+// @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
 // @match        https://*.evades.online/*
@@ -27,6 +27,7 @@ let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, stat
 let bingoSaveData = { board: [], lastSave: {} };
 const LS_KEY = 'evbingo:settings';
 const TEAMS = new Set(['red', 'green', 'blue']);
+const TEAMS = new Set(['red', 'green', 'blue', 'orange']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
     "ROOM_INFO": "room",
@@ -52,6 +53,70 @@ const SERVER_INFO_SCENES = { // Fake Enum :sob:
     IN_ROOM: 'in_room',
     GAME_STARTED: 'game_started',
 }
+const REGIONS = {
+    "Burning Bunker": 36,
+    "Burning Bunker Hard": 36,
+    "Central Core": 40,
+    "Central Core Hard": 40,
+    "Cyber Castle": 15,
+    "Cyber Castle Hard": 22,
+    "Catastrophic Core": 40,
+    "Coupled Corridors": 64,
+    "Dangerous District": 80,
+    "Dangerous District Hard": 80,
+    "Dusty Depths": 20,
+    "Elite Expanse": 80,
+    "Elite Expanse Hard": 80,
+    /*
+    "Endless Echo": 0,
+    "Endless Echo Hard": 0,
+    */
+    "Frozen Fjord": 40,
+    "Frozen Fjord Hard": 40,
+    "Glacial Gorge": 40,
+    "Glacial Gorge Hard": 40,
+    "Grand Garden": 28,
+    "Grand Garden Hard": 28,
+    "Humongous Hollow": 80,
+    "Humongous Hollow Hard": 80,
+    "Haunted Halls": 16,
+    "Haunted Halls Deep Woods": 25,
+    "Infinite Inferno": 38,
+    "Monumental Migration 120": 120,
+    "Monumental Migration 480": 480,
+    "Magnetic Monopole": 36,
+    "Magnetic Monopole Dipole": 35,
+    "Magnetic Monopole Hard": 36,
+    "Magnetic Monopole Dipole Hard": 35,
+    "Mysterious Mansion Hedge": 59, //Hat
+    "Mysterious Mansion Liminal": 60,
+    "Mysterious Mansion Attic": 61,
+    "Mysterious Mansion Cryptic": 62, //Hero
+    "Ominous Occult": 16,
+    "Ominous Occult Hard": 16,
+    "Peculiar Pyramid Inner": 29,
+    "Peculiar Pyramid Perimeter": 31,
+    "Peculiar Pyramid Inner Hard": 29,
+    "Peculiar Pyramid Perimeter Hard": 31,
+    "Quiet Quarry": 40,
+    "Quiet Quarry Hard": 40,
+    "Restless Ridge": 43,
+    "Restless Ridge Hard": 47,
+    "Shifting Sands": 47,
+    "Toxic Territory": 20,
+    "Toxic Territory Hard": 20,
+    "Vicious Valley": 40,
+    "Vicious Valley Hard": 40,
+    "Wacky Wonderland": 80,
+    "Wacky Wonderland Hard": 80,
+    "Withering Wasteland": 40,
+    "Terrifying Temple": 40,
+    "Lonely Laboratory": 40,
+    "Ancient Abyss": 40,
+    "Vast Void": 50,
+    "Pristine Purgatory": 20,
+}
+
 const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end point
     "Monumental Migration": {
         120: "Monumental Migration 120",
@@ -84,11 +149,6 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
         25: "Haunted Halls Deep Woods"
     },
     /*
-    "Pristine Purgatory": {
-        22: "Pristine Purgatory Eternal",
-        23: "Pristine Purgatory Veydris",
-    }
-    */
 }
 
 // ===== Utilities =====
@@ -337,7 +397,8 @@ function sendData(type, data) {
 }
 
 function createRoom(team, maxPlayerCount) {
-    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount })
+function createRoom(team, maxPlayerCount, boardSize) {
+    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount, board_size: boardSize })
 }
 
 function joinRoom(roomId, team) {
@@ -353,7 +414,8 @@ function startGame(roomId) {
 }
 
 function restartGame(roomId) {
-    sendData(CLIENT_MESSAGE_TYPES.RESTART_GAME, { room_id: roomId })
+function restartGame(roomId, boardSize) {
+    sendData(CLIENT_MESSAGE_TYPES.RESTART_GAME, { room_id: roomId, board_size: boardSize })
 }
 
 function makeMove(roomId, cell) {
@@ -383,7 +445,7 @@ window.BingoClient = {
     board: [],
     settings: {
         maxPlayerCount: 20,
-        boardSize: 5,
+        maxPlayerCount: 16,
         team: 'red'
     },
     current: {
@@ -423,7 +485,6 @@ BingoClient.disconnectFromServer = () => {
 }
 
 BingoClient.createRoom = () => {
-    createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount);
 }
 
 BingoClient.joinRoom = () => {
@@ -440,7 +501,6 @@ BingoClient.startGame = () => {
 }
 
 BingoClient.restartGame = () => {
-    restartGame(BingoClient.roomId);
 }
 
 BingoClient.joinTeam = (newTeam) => {
@@ -571,6 +631,8 @@ function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
     return currentRegion;
 }
 
+    return Math.floor(areaNumber / divisible)
+}
 function findCurrentCellAttempt() {
     for (let rowIndex = 0; rowIndex < BingoClient.board.length; rowIndex++) {
         const row = BingoClient.board[rowIndex];
