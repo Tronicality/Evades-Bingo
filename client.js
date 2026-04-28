@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.5
+// @version      0.1.6
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -21,6 +21,9 @@ Guys this is a hotfix
 - Add back rest of options (0.1.x)
 - Fix disconnect issue
 - Fix team mismatch
+- Fix bingo board re-sizing bug
+- Fix focus bug on settings menu
+- Fix end game
 */
 
 // ===== Global Variables =====
@@ -636,6 +639,8 @@ function getHalfAreaNumber(regionName, divisible = 2) {
     if (!Number.isInteger(divisible) || divisible <= 0) divisible = 2;
 
     const areaNumber = REGIONS[regionName];
+
+    if (areaNumber > 40)
         return 20
     return Math.floor(areaNumber / divisible)
 }
