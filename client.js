@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.4
+// @version      0.1.5
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -19,6 +19,8 @@ Guys this is a hotfix
 - Security (0.1.x)
 - Update Server Rules (0.1.x)
 - Add back rest of options (0.1.x)
+- Fix disconnect issue
+- Fix team mismatch
 */
 
 // ===== Global Variables =====
@@ -26,7 +28,6 @@ let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes, hb;
 let bingoSaveData = { board: [], lastSave: {} };
 const LS_KEY = 'evbingo:settings';
-const TEAMS = new Set(['red', 'green', 'blue']);
 const TEAMS = new Set(['red', 'green', 'blue', 'orange']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
@@ -53,6 +54,7 @@ const SERVER_INFO_SCENES = { // Fake Enum :sob:
     IN_ROOM: 'in_room',
     GAME_STARTED: 'game_started',
 }
+
 const REGIONS = {
     "Burning Bunker": 36,
     "Burning Bunker Hard": 36,
@@ -148,7 +150,6 @@ const MULTIPLE_WIN_REGIONS = { // Key: area number, Value: Specified map end poi
         16: "Haunted Halls",
         25: "Haunted Halls Deep Woods"
     },
-    /*
 }
 
 // ===== Utilities =====
@@ -396,7 +397,6 @@ function sendData(type, data) {
     }
 }
 
-function createRoom(team, maxPlayerCount) {
 function createRoom(team, maxPlayerCount, boardSize) {
     sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount, board_size: boardSize })
 }
@@ -413,7 +413,6 @@ function startGame(roomId) {
     sendData(CLIENT_MESSAGE_TYPES.START_GAME, { room_id: roomId })
 }
 
-function restartGame(roomId) {
 function restartGame(roomId, boardSize) {
     sendData(CLIENT_MESSAGE_TYPES.RESTART_GAME, { room_id: roomId, board_size: boardSize })
 }
@@ -444,8 +443,8 @@ window.BingoClient = {
     hasBoardUI: false,
     board: [],
     settings: {
-        maxPlayerCount: 20,
         maxPlayerCount: 16,
+        boardSize: 3,
         team: 'red'
     },
     current: {
@@ -485,6 +484,7 @@ BingoClient.disconnectFromServer = () => {
 }
 
 BingoClient.createRoom = () => {
+    createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount, BingoClient.settings.boardSize);
 }
 
 BingoClient.joinRoom = () => {
@@ -501,6 +501,7 @@ BingoClient.startGame = () => {
 }
 
 BingoClient.restartGame = () => {
+    restartGame(BingoClient.roomId, BingoClient.settings.boardSize);
 }
 
 BingoClient.joinTeam = (newTeam) => {
@@ -631,8 +632,14 @@ function regionNameFilter(currentRegion) { // e.g. Turn MM480 into MM
     return currentRegion;
 }
 
+function getHalfAreaNumber(regionName, divisible = 2) {
+    if (!Number.isInteger(divisible) || divisible <= 0) divisible = 2;
+
+    const areaNumber = REGIONS[regionName];
+        return 20
     return Math.floor(areaNumber / divisible)
 }
+
 function findCurrentCellAttempt() {
     for (let rowIndex = 0; rowIndex < BingoClient.board.length; rowIndex++) {
         const row = BingoClient.board[rowIndex];
@@ -658,7 +665,7 @@ function findCurrentCellAttempt() {
 
 function saveAttempt() {
     if (!self) return;
-    if (self.areaNumber <= 5 || self.survivalTime < 40) return;
+    if (self.areaNumber < getHalfAreaNumber(self.regionName) || self.survivalTime < 40) return;
     if (!Number.isNaN(bingoSaveData.lastSave.areaNumber)) { // Don't enter if not started
         if (self.areaNumber <= bingoSaveData.lastSave.areaNumber
             && regionNameFilter(bingoSaveData.lastSave.region.name) === self.regionName
@@ -763,7 +770,6 @@ win.WebSocket = class extends win.WebSocket {
                 args[1] = direct_proxy(args[1], (to, what, args) => {
                     const ret = to.apply(what, args);
 
-                    // Per frame
                     trackBingoProgress();
 
                     return ret;
@@ -1185,6 +1191,9 @@ function addBingoBoardUI(board) {
 }
 .team-green {
     background-color: #3d3;
+}
+.team-orange {
+    background-color: rgb(255, 123, 0);
 }
 .team-none {
     background-color: #555;
