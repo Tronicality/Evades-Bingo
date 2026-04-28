@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.2
+// @version      0.1.3
 // @description  Evades bingo... no way!
 // @author       Br1h
 // @match        https://*.evades.io/*
