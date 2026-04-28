@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.6
+// @version      0.1.7
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -21,7 +21,6 @@ Guys this is a hotfix
 - Add back rest of options (0.1.x)
 - Fix disconnect issue
 - Fix team mismatch
-- Fix bingo board re-sizing bug
 - Fix focus bug on settings menu
 - Fix end game
 */
@@ -896,6 +895,12 @@ function addMessageHandler() {
 
 // Bingo Board UI
 
+function secondsToMinutes(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}m ${secs}s`;
+}
+
 function updateMiniHoverArea() {
   const rect = miniBoardEl.getBoundingClientRect();
   const extra = 20;
@@ -931,8 +936,6 @@ function createMiniBoard(boardData, element) {
             element.appendChild(div);
         });
     });
-
-    updateMiniHoverArea();
 }
 
 function addMarkedInfo(div, cell) {
@@ -976,7 +979,7 @@ function addTooltipInfo(div, cell) {
         if (marked_info?.is_marked) {
             addLine("Marked by: ", marked_info.player || "Unknown");
             addLine("Team: ", marked_info.team || "None");
-            addLine("Time: ", marked_info.time || "N/A");
+            addLine("Time: ", secondsToMinutes(marked_info.time) || "N/A");
             addLine("Area Number: ", marked_info.reached_index || "N/A");
         } else {
             addLine("", "Not marked");
@@ -1071,12 +1074,37 @@ function updateBoard(targetCell, row, col) {
     updateCellBigBoard(targetCell, row, col);
 }
 
+/*
 function updateWholeBoard() {
     BingoClient.board.forEach((row, rowIndex) => {
         row.forEach((cell, colIndex) => {
             updateBoard(cell, rowIndex, colIndex);
         });
     })
+}
+    */
+
+function updateWholeBoard() {
+    if (!BingoClient.hasBoardUI) return;
+
+    const board = BingoClient.board;
+    const newSize = board.length;
+    const currentSize = Math.round(Math.sqrt(miniBoardEl.querySelectorAll('div').length));
+
+    if (currentSize !== newSize) {
+        miniBoardEl.innerHTML = '';
+        bigBoardEl.innerHTML = '';
+        createMiniBoard(board, miniBoardEl);
+        createBigBoard(board, bigBoardEl);
+        updateMiniHoverArea();
+        return;
+    }
+
+    board.forEach((row, rowIndex) => {
+        row.forEach((cell, colIndex) => {
+            updateBoard(cell, rowIndex, colIndex);
+        });
+    });
 }
 
 function showBigBoard() {
@@ -1381,6 +1409,7 @@ function addSelectSetting(labelAddedClass, labelText, selectId, options, selecte
     input.className = 'settings-select';
     input.id = selectId; // Later Br1h realised, why did I add this as an ID???? why not class??? am i bugging????
     // New br1h here that woke up, that guy b4 was coding at 3am, he was bugging
+    // 2026 here, no clue wtf they're talking about
 
     for (const option of options) {
         const optionElement = document.createElement('option');
