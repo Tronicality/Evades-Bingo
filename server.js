@@ -1,6 +1,6 @@
 // ===== Dependencies =====
 const express = require('express');
-const http = require('http');
+const http = require('node:http');
 const WebSocket = require('ws');
 
 // ===== App Setup =====
@@ -29,7 +29,6 @@ const SERVER_MESSAGES = {
         ROOM_JOINED: 'room_joined',
         LEFT_ROOM: 'left_room',
         GAME_STARTED: 'game_started',
-        GAME_RESTARTED: 'game_restarted',
         GAME_END: 'game_ended',
         UPDATE_BOARD: 'update_board',
         UPDATE_TEAMS: 'update_teams',
@@ -96,12 +95,10 @@ wss.on('connection', (ws) => {
     console.log(`${ws.id || "Client"} connected`);
 
     ws.on('message', (message) => {
-        if (!isDataSafe(message)){
-            handleMessage(JSON.parse({type: "UNSAFE"}), ws);
-        }
-        else {
+        if (isDataSafe(message))
             handleMessage(JSON.parse(message), ws);
-        }
+        else
+            handleMessage(JSON.parse({type: 'unsafe'}), ws);
     });
 
     ws.on('close', () => {
@@ -376,7 +373,7 @@ function joinRoom(data, ws) {
     room.players.push(ws);
     joinTeam(data, ws);
 
-    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId, admin: room.admin });
+    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId, admin: room.admin, max_player_count: room.max_player_count, board_size: room.board.length });
     console.log(`User ${ws.id} joined room ${roomId}`);
 }
 
@@ -406,13 +403,6 @@ function validateStartGame(room, ws) {
         return false;
     }
 
-    /*
-    if (room.players.length < 2) {
-        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.NOT_ENOUGH_PLAYERS);
-        return false;
-    }
-    */
-
     return true;
 }
 
@@ -425,7 +415,7 @@ function startGame(data, ws) {
     updateRoomActionTimer(room)
 
     room.game_started = true;
-    //room.board = generateBoard(data.board_size);
+    room.board = generateBoard(data.board_size);
     room.game_ended = false;
     room.players.forEach(player => {
         sendData(player, SERVER_MESSAGES.TYPES.GAME_STARTED, { board: room.board });
@@ -472,17 +462,14 @@ function restartGame(data, ws) {
     room.game_ended = false;
 
     room.players.forEach(player => {
-        //sendData(player, SERVER_MESSAGES.TYPES.GAME_RESTARTED, { board: room.board });
         sendData(player, SERVER_MESSAGES.TYPES.GAME_STARTED, { board: room.board });
         sendMessage(player, SERVER_MESSAGES.TYPES.GAME_INFO, SERVER_MESSAGES.GAME.RESTARTED);
     });
-
-    //console.log(`Game restarted in room ${roomId}`);
 }
 
 function findUserTeam(userId, room) {
     for (const [teamName, teamList] of Object.entries(room.teams)) {
-        const playerIndex = teamList.findIndex((playerId) => playerId === userId);
+        const playerIndex = teamList.indexOf(userId);
 
         if (playerIndex === -1) continue;
         return teamName
@@ -522,12 +509,10 @@ function validateMakeMove(room, ws, cell) { // again in future i'll redo validat
         return false;
     }
 
-    /*
     if (!TEAMS.has(cell.team)) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.TEAM_NOT_FOUND);
         return false;
     }
-    */
 
     if (!cell || !Number.isInteger(cell.row) || !Number.isInteger(cell.col)) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.INVALID_CELL_COORDINATES);
@@ -572,7 +557,7 @@ function canMarkCell(room, oldCell, newCell, ws) {
     }
 
     // Player hasn't beaten half the map
-    if (newCell.marked_info.reached_index < getHalfAreaNumber(targetCell.game_info.region)) {
+    if (newCell.index < getHalfAreaNumber(targetCell.game_info.region)) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.MARK.HALF)
         return false;
     }
@@ -611,10 +596,7 @@ function makeMove(data, ws) {
     oldCell.marked_info.time = newCell.time;
     oldCell.marked_info.team = findUserTeam(ws.id, room);
 
-    //console.log(`User ${ws.id} marked cell at (${newCell.row}, ${newCell.col}) in room ${roomId}`);
     if (checkBingo(room.board, oldCell.marked_info.team)) {
-        //console.log(`User ${ws.id} won in room ${roomId}`);
-
         room.game_ended = true;
         room.players.forEach(player => {
             sendData(player, SERVER_MESSAGES.TYPES.GAME_END, { winner: oldCell.marked_info.team });
@@ -738,9 +720,9 @@ function isDataSafe(message) {
     const MAX_MESSAGE_SIZE = 10 * 1024; // 10 KB
 
     try {
-        if (message === null || message === undefined) {
+        if (message === null || message === undefined)
             return false;
-        }
+            
 
         let raw;
 
@@ -794,8 +776,6 @@ function isDataSafe(message) {
 }
 
 function handleMessage(message, ws) {
-    //console.log(`${ws.id} sent [type: ${message.type}]`);
-    
     switch (message.type) {
         case 'ping':
             break;
@@ -829,7 +809,7 @@ function handleMessage(message, ws) {
         case 'change_team':
             changeTeam(message.data, ws);
             break;
-        case 'UNSAFE':
+        case 'unsafe':
             sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, 'Unsafe or invalid message received');
             break;
         default:
@@ -880,8 +860,10 @@ const REGIONS = {
     "Burning Bunker Hard": 36,
     "Central Core": 40,
     "Central Core Hard": 40,
+    /*
     "Cyber Castle": 15,
     "Cyber Castle Hard": 22,
+    */
     "Catastrophic Core": 40,
     "Coupled Corridors": 64,
     "Dangerous District": 80,
@@ -1055,7 +1037,6 @@ function generateCell(usedRegions) {
 
     cell.game_info = generateGoal(usedRegions);
     cell.marked_info = markedInfo;
-    //cell.settings = {};
 
     return cell;
 }
@@ -1109,6 +1090,7 @@ function checkHorizontalWin(board, team) {
         }
     }
 }
+
 function checkVerticalRow(board, col, team) {
     const size = board.length;
     for (let row = 0; row < size; row++) {
@@ -1118,6 +1100,7 @@ function checkVerticalRow(board, col, team) {
     }
     return false;
 }
+
 function checkVerticalWin(board, team) {
     const size = board.length;
     for (let col = 0; col < size; col++) {
@@ -1126,6 +1109,7 @@ function checkVerticalWin(board, team) {
         }
     }
 }
+
 function checkDiagonalWin(board, team) {
     const size = board.length;
     // Check \
@@ -1150,7 +1134,7 @@ setInterval(() => {
 
 setInterval(() => {
     checkWebSockets();
-}, 30 * 1000)
+}, 20 * 1000)
 
 
 // ===== Start Server =====

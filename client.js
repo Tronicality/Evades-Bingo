@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.7
+// @version      0.1.8
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -15,18 +15,17 @@
 'use strict';
 
 /* TODO
-Guys this is a hotfix
-- Security (0.1.x)
-- Update Server Rules (0.1.x)
-- Add back rest of options (0.1.x)
-- Fix disconnect issue
-- Fix team mismatch
+- Security
+- Add back rest of options
+- Fix disconnect issue - hopfully fixed?
 - Fix focus bug on settings menu
 - Fix end game
+- Fix send run buttons?
+- /reset /warp upon clicking goal
 */
 
 // ===== Global Variables =====
-let win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+let win = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes, hb;
 let bingoSaveData = { board: [], lastSave: {} };
 const LS_KEY = 'evbingo:settings';
@@ -62,8 +61,10 @@ const REGIONS = {
     "Burning Bunker Hard": 36,
     "Central Core": 40,
     "Central Core Hard": 40,
+    /*
     "Cyber Castle": 15,
     "Cyber Castle Hard": 22,
+    */
     "Catastrophic Core": 40,
     "Coupled Corridors": 64,
     "Dangerous District": 80,
@@ -217,7 +218,6 @@ function clearLastSave() {
 
 function clearBingoSaveData() {
     bingoSaveData = { board: [], lastSave: {} };
-    //bingoSaveData = { region: null, hero: null, time: null, areaNumber: null, row: null, col: null, };
 }
 
 
@@ -237,6 +237,8 @@ function handleServerMessage(message) {
 
             BingoClient.roomId = message.data.id;
             BingoClient.admin = BingoClient.userId;
+            BingoClient.current.maxPlayerCount = BingoClient.settings.maxPlayerCount;
+            BingoClient.current.boardSize = BingoClient.settings.boardSize;
 
             updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
             break;
@@ -245,6 +247,8 @@ function handleServerMessage(message) {
 
             BingoClient.roomId = message.data.id;
             BingoClient.admin = message.data.admin;
+            BingoClient.current.maxPlayerCount = message.data.max_player_count;
+            BingoClient.current.boardSize = message.data.board_size;
 
             updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
             break;
@@ -278,11 +282,6 @@ function handleServerMessage(message) {
 
             showBingoBoardUI();
             break;
-        /*
-        case 'game_restarted':
-            console.log('Game restarted! Board:', message.data.board);
-            break;
-        */
         case 'game_ended':
             showMessage(`Game Ended!`);
             showMessage(`Winning is Team ${message.data.winner}`, MESSAGE_TYPES.WINNER);
@@ -290,15 +289,6 @@ function handleServerMessage(message) {
             BingoClient.inBingoGame = false;
             updateServerInformation(SERVER_INFO_SCENES.CONNECTED);
             break;
-        /*
-        case 'bingo':
-            showMessage(message.message, MESSAGE_TYPES.WINNER);
-            BingoClient.board = message.data.board;
-            updateWholeBoard();
-
-            BingoClient.inBingoGame = false;
-            break;
-        */
         case 'player_left':
             showMessage(`Player ${message.data.user_id} left the room`);
             break;
@@ -319,11 +309,12 @@ function handleServerMessage(message) {
             BingoClient.current.teams = message.data.teams;
             updateBingoTeams();
             break;
-        case 'error':
+        case 'error': {
             const msg = `Error: ${message.message}`
             showMessage(msg, MESSAGE_TYPES.ERROR);
             console.error(msg);
             break;
+        }
         default:
             showMessage(`Something broke! Check Console!`, MESSAGE_TYPES.ERROR);
             console.warn('Unknown message type:', message.type);
@@ -341,7 +332,7 @@ function connectToServer() {
 
     ws.addEventListener('open', () => {
         showMessage('Connected to the server');
-        hb = setInterval(()=> sendData('ping', Date.now()), 30 * 1000);
+        hb = setInterval(()=> sendData('ping', Date.now()), 60 * 1000);
         ws.send(JSON.stringify({ type: 'register', data: { user_id: BingoClient.userId } }));
     });
 
@@ -391,6 +382,11 @@ function clearClient() {
 }
 
 function sendData(type, data) {
+    if (!BingoClient.socket) {
+        showMessage("Not connected!", MESSAGE_TYPES.ERROR);
+        return;
+    }
+
     try {
         BingoClient.socket.send(JSON.stringify({ type: type, data: data }))
     } catch (error) {
@@ -399,8 +395,8 @@ function sendData(type, data) {
     }
 }
 
-function createRoom(team, maxPlayerCount, boardSize) {
-    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount, board_size: boardSize })
+function createRoom(team, maxPlayerCount) {
+    sendData(CLIENT_MESSAGE_TYPES.CREATE_ROOM, { team: team, max_player_count: maxPlayerCount })
 }
 
 function joinRoom(roomId, team) {
@@ -411,8 +407,8 @@ function leaveRoom(roomId) {
     sendData(CLIENT_MESSAGE_TYPES.LEAVE_ROOM, { room_id: roomId })
 }
 
-function startGame(roomId) {
-    sendData(CLIENT_MESSAGE_TYPES.START_GAME, { room_id: roomId })
+function startGame(roomId, boardSize) {
+    sendData(CLIENT_MESSAGE_TYPES.START_GAME, { room_id: roomId, board_size: boardSize })
 }
 
 function restartGame(roomId, boardSize) {
@@ -486,7 +482,7 @@ BingoClient.disconnectFromServer = () => {
 }
 
 BingoClient.createRoom = () => {
-    createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount, BingoClient.settings.boardSize);
+    createRoom(BingoClient.settings.team, BingoClient.settings.maxPlayerCount);
 }
 
 BingoClient.joinRoom = () => {
@@ -499,7 +495,7 @@ BingoClient.leaveRoom = () => {
 }
 
 BingoClient.startGame = () => {
-    startGame(BingoClient.roomId);
+    startGame(BingoClient.roomId, BingoClient.settings.boardSize);
 }
 
 BingoClient.restartGame = () => {
@@ -1069,23 +1065,13 @@ function updateTeamCell(row, col) {
 }
 
 function updateBoard(targetCell, row, col) {
-    //updateTeamCell(row, col); // Matches cell to player team even upon changes
+    // Use updateTeamCell(row, col); to match cell to player team even upon changes
     updateCellMiniBoard(targetCell, row, col);
     updateCellBigBoard(targetCell, row, col);
 }
 
-/*
 function updateWholeBoard() {
-    BingoClient.board.forEach((row, rowIndex) => {
-        row.forEach((cell, colIndex) => {
-            updateBoard(cell, rowIndex, colIndex);
-        });
-    })
-}
-    */
-
-function updateWholeBoard() {
-    if (!BingoClient.hasBoardUI) return;
+    if (!BingoClient.hasBoardUI || !BingoClient.inBingoGame) return;
 
     const board = BingoClient.board;
     const newSize = board.length;
@@ -1332,7 +1318,6 @@ function addLabel(labelAddedClass, labelText, labelId) {
     const label = document.createElement('label');
     label.style.display = 'none';
     label.classList.add('settings-label', labelAddedClass);
-    //exampleLabel.setAttribute('for', 'example-bingo-setting');
 
     if (labelId)
         label.id = labelId;
@@ -1365,8 +1350,8 @@ function addCheckboxSetting(labelAddedClass, labelText, checkboxId) {
     return label;
 }
 
-function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, step, value = undefined) {
-    if (!labelAddedClass || !labelText || !sliderId || !min || !max || !step || (!value && value !== 0)) {
+function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, value = undefined, functionCallBack = undefined) {
+    if (!labelAddedClass || !labelText || !sliderId || !min || !max || (!value && value !== 0)) {
         console.log("Missing slider params")
         return;
     }
@@ -1380,7 +1365,7 @@ function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, step, 
     input.id = sliderId;
     input.min = min;
     input.max = max;
-    input.step = step;
+    input.step = 1;
     input.value = value;
 
     const valueDisplay = document.createElement('span');
@@ -1389,6 +1374,12 @@ function addSliderSetting(labelAddedClass, labelText, sliderId, min, max, step, 
     input.addEventListener('input', (event) => {
         valueDisplay.textContent = `: ${event.target.value}`;
     });
+
+    if (functionCallBack) {
+        input.addEventListener('change', (event) => {
+            functionCallBack(event.target.value);
+        })
+    }
 
     labelDiv.appendChild(input);
     labelDiv.appendChild(valueDisplay);
@@ -1418,7 +1409,7 @@ function addSelectSetting(labelAddedClass, labelText, selectId, options, selecte
         input.appendChild(optionElement);
     }
 
-    input.selectedIndex = selectedIndex;
+    input.value = selectedIndex;
 
     if (functionCallback) {
         input.addEventListener('change', (event) => {
@@ -1446,7 +1437,9 @@ function addButtonSetting(labelAddedClass, labelText, buttonId, functionCallBack
     input.id = buttonId;
     input.textContent = 'Click Me!';
 
-    input.addEventListener('click', event => functionCallBack(event));
+    input.addEventListener('click', (event) => {
+        functionCallBack(event)
+    });
 
     labelDiv.appendChild(input);
 
@@ -1475,6 +1468,7 @@ function setVariableKeyBind(targetObj, keyName, labelId) {
     const handler = (event) => {
         setKeyBinding(event, targetObj, keyName, labelId);
         document.removeEventListener('keydown', handler);
+        saveSettings();
     };
 
     document.addEventListener('keydown', handler);
@@ -1682,8 +1676,38 @@ function findTeamSelectedIndex(currentTeam) {
 }
 
 function updateBingoClientSettingsLabels() {
+    if (BingoClient.current.scene === SERVER_INFO_SCENES.IN_ROOM || BingoClient.current.scene === SERVER_INFO_SCENES.GAME_STARTED) {
+        document.getElementById('room-label').textContent = 'Room settings';
+
+        const maxPlayerCount = document.getElementById('max-player-count');
+        maxPlayerCount.value = BingoClient.current.maxPlayerCount;
+        maxPlayerCount.disabled = true;
+
+        /*
+        if (BingoClient.admin !== BingoClient.userId) {
+            const boardSize = document.getElementById("board-size")
+            boardSize.value = BingoClient.current.boardSize;
+            boardSize.style.display = 'none';
+        }
+            */
+    }
+    else {
+        document.getElementById('room-label').textContent = 'Preset settings';
+
+        const maxPlayerCount = document.getElementById('max-player-count');
+        maxPlayerCount.value = BingoClient.settings.maxPlayerCount;
+        maxPlayerCount.disabled = false;
+
+        /*
+        const boardSize = document.getElementById("board-size")
+        boardSize.value = BingoClient.settings.boardSize;
+        boardSize.style.display = 'none';
+        */
+    }
+    
     if (updateSettingsTeams() !== 'No teams') return;
     document.getElementById('teamInformationLabel').style.display = 'none';
+    document.getElementById('current-team').value = findTeamSelectedIndex(BingoClient.settings.team);
 }
 
 function handleTeamSelectLabel(newTeam) {
@@ -1694,6 +1718,20 @@ function handleTeamSelectLabel(newTeam) {
     else {
         BingoClient.settings.team = newTeam;
     }
+}
+
+function handleMaxPlayerSettings(event) {
+    if (BingoClient.isConnected && BingoClient.roomId !== null)
+        BingoClient.current.maxPlayerCount = Number.parseInt(event);
+    else
+        BingoClient.settings.maxPlayerCount = Number.parseInt(event);
+}
+
+function handleBoardSizeSliderSettings(event) {
+    if (BingoClient.isConnected && BingoClient.roomId !== null)
+        BingoClient.current.boardSize = Number.parseInt(event);
+    else
+        BingoClient.settings.boardSize = Number.parseInt(event);
 }
 
 function addBingoClientSettingsLabels(labelAddedClass) {
@@ -1710,14 +1748,16 @@ function addBingoClientSettingsLabels(labelAddedClass) {
         addLabel(labelAddedClass, 'No teams', 'teamInformationLabel'),
         ...(BingoClient.isConnected && BingoClient.roomId !== null
             ? [
-                //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.current.maxPlayerCount),
-                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.current.boardSize),
+                addLabel(labelAddedClass, 'Room settings', 'room-label'),
                 addSelectSetting(labelAddedClass, 'Your Team', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.current.team), handleTeamSelectLabel),
+                addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 20, BingoClient.current.maxPlayerCount, handleMaxPlayerSettings),
+                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 1, 10, BingoClient.current.boardSize, handleBoardSizeSliderSettings),
             ]
             : [
-                //addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 10, 1, BingoClient.settings.maxPlayerCount),
-                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 3, 10, 1, BingoClient.settings.boardSize),
-                addSelectSetting(labelAddedClass, 'Your Team', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.settings.team), handleTeamSelectLabel),
+                addLabel(labelAddedClass, 'Preset settings', 'room-label'),
+                addSelectSetting(labelAddedClass, 'Your Team', 'current-team', generateTeamsSelect(), findTeamSelectedIndex(BingoClient.settings.team), (event) => { handleTeamSelectLabel(event); saveSettings();}),
+                addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 20, BingoClient.settings.maxPlayerCount, (event) => {handleMaxPlayerSettings(event); saveSettings();}),
+                //addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 1, 10, BingoClient.settings.boardSize, (event) =>  {handleBoardSizeSliderSettings(event); saveSettings();}),
             ]),
         addButtonSetting(labelAddedClass, `Send Recent Run Button Keybind (${BingoClient.bindings.sendRecentRun || 'None'})`, 'sendRecentRunKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendRecentRun', 'sendRecentRunKeybindLabel'); }, 'sendRecentRunKeybindLabel'),
         addButtonSetting(labelAddedClass, `Send All Runs Button Keybind (${BingoClient.bindings.sendAllRuns || 'None'})`, 'sendAllRunsKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendAllRuns', 'sendAllRunsKeybindLabel'); }, 'sendAllRunsKeybindLabel'),
@@ -1753,8 +1793,6 @@ const settingsObserver = new MutationObserver((mutationsList) => {
         }
     }
 });
-// observer.disconnect();
-
 
 // Start things
 function evadesBingoInit() {
