@@ -1,5 +1,6 @@
 // ===== Dependencies =====
 const express = require('express');
+const https = require('node:https');
 const http = require('node:http');
 const WebSocket = require('ws');
 
@@ -825,6 +826,20 @@ function handleGameDisconnect(userId) {
     // Maybe add buffer for reconnect chances
 }
 
+function keepAlive() {
+    const url = "https://evades-bingo.onrender.com";
+    if (!url) return;
+
+    // Only ping if there are active players
+    if (userIds.size === 0) return;
+
+    https.get(url, (res) => {
+        console.log(`Keep-alive ping: ${res.statusCode}`);
+    }).on('error', (err) => {
+        console.error('Keep-alive failed:', err.message);
+    });
+}
+
 function checkWebSockets() {
     wss.clients.forEach((ws) => {
         if (ws.isAlive === false) {
@@ -1128,14 +1143,9 @@ function checkBingo(board, team) {
     return checkHorizontalWin(board, team) || checkVerticalWin(board, team) || checkDiagonalWin(board, team);
 }
 
-setInterval(() => {
-    checkRoomRemoval();
-}, 5 * 60 * 1000);
-
-setInterval(() => {
-    checkWebSockets();
-}, 20 * 1000)
-
+setInterval(checkRoomRemoval, 5 * 60 * 1000);
+setInterval(checkWebSockets, 60 * 1000)
+setInterval(keepAlive, 60 * 1000)
 
 // ===== Start Server =====
 const PORT = process.env.PORT || 10000;
