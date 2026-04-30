@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.9
+// @version      0.2.0
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -63,10 +63,8 @@ const REGIONS = {
     "Burning Bunker Hard": 36,
     "Central Core": 40,
     "Central Core Hard": 40,
-    /*
     "Cyber Castle": 15,
     "Cyber Castle Hard": 22,
-    */
     "Catastrophic Core": 40,
     "Coupled Corridors": 64,
     "Dangerous District": 80,
@@ -1022,7 +1020,11 @@ function createBigBoard(boardData, element) {
 }
 
 function updateTeamClass(div, cell) {
-    div.classList.remove('team-none', 'team-blue', 'team-green', 'team-red');
+    TEAMS.forEach(teamColor => {
+        div.classList.remove(`team-${teamColor}`)
+    });
+
+    div.classList.remove('team-none');
 
     if (cell.marked_info.is_marked) {
         div.classList.add(`team-${cell.marked_info.team || 'none'}`);
@@ -1802,4 +1804,4 @@ function evadesBingoInit() {
     settingsObserver.observe(targetNode, { childList: true, subtree: true });
 }
 
-window.addEventListener('DOMContentLoaded', evadesBingoInit);
+evadesBingoInit();

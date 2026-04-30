@@ -898,8 +898,10 @@ const REGIONS = {
     "Grand Garden Hard": 28,
     "Humongous Hollow": 80,
     "Humongous Hollow Hard": 80,
+    /*
     "Haunted Halls": 16,
     "Haunted Halls Deep Woods": 25,
+    */
     "Infinite Inferno": 38,
     "Monumental Migration 120": 120,
     "Monumental Migration 480": 480,

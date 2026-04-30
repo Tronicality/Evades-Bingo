@@ -16,6 +16,8 @@ The direct link for the code is [here](https://raw.githubusercontent.com/Tronica
 
 Get the web extension Tampermonkey. The you can paste all of it there, turn on updates and it will auto-update and apply the code everytime you refresh (Don't forget to turn on developer mode for tampermonkey otherwise it will not work within your web browser settings).
 
+Or just paste it into the console when ingame
+
 If there's any errors you can open an issue or contact me on discord (.realityy)
 
 # Playing
