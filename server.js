@@ -1145,7 +1145,7 @@ function checkBingo(board, team) {
 
 setInterval(checkRoomRemoval, 5 * 60 * 1000);
 setInterval(checkWebSockets, 60 * 1000)
-setInterval(keepAlive, 60 * 1000)
+setInterval(keepAlive, 5 * 60 * 1000)
 
 // ===== Start Server =====
 const PORT = process.env.PORT || 10000;

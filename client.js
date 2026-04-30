@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.1.8
+// @version      0.1.9
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -21,6 +21,8 @@
 - Fix focus bug on settings menu
 - Fix end game
 - Fix send run buttons?
+- Fix board not resetting after game after creating new room
+- Fix assignment of new admin
 - /reset /warp upon clicking goal
 */
 
@@ -260,17 +262,15 @@ function handleServerMessage(message) {
             break;
         case 'game_started':
             BingoClient.board = message.data.board;
-
-            if (BingoClient.hasBoardUI) {
-                updateWholeBoard();
-            }
-            else {
-                addBingoBoardUI(BingoClient.board);
-            }
-
-            showBingoBoardUI();
             BingoClient.inBingoGame = true;
 
+            if (BingoClient.hasBoardUI)
+                updateWholeBoard();
+            else
+                addBingoBoardUI(BingoClient.board);
+
+            showBingoBoardUI();
+            
             clearBingoSaveData();
             createSaveDataReserves(message.data.board);
             updateServerInformation(SERVER_INFO_SCENES.GAME_STARTED);
@@ -287,7 +287,7 @@ function handleServerMessage(message) {
             showMessage(`Winning is Team ${message.data.winner}`, MESSAGE_TYPES.WINNER);
 
             BingoClient.inBingoGame = false;
-            updateServerInformation(SERVER_INFO_SCENES.CONNECTED);
+            updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
             break;
         case 'player_left':
             showMessage(`Player ${message.data.user_id} left the room`);
