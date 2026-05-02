@@ -53,6 +53,7 @@ const SERVER_MESSAGES = {
         GAME_ENDED: 'Game has ended',
         TEAM_ALREADY_EXISTS: 'You are already on a team',
         ROOM_ALREADY_EXISTS: 'Room already exists',
+        INVALID_BOARD_SIZE: "Board size must be within 1-6 (inclusive)",
     },
     GAME: {
         STARTED: 'Game has started!',
@@ -96,10 +97,13 @@ wss.on('connection', (ws) => {
     console.log(`${ws.id || "Client"} connected`);
 
     ws.on('message', (message) => {
+        handleMessage(JSON.parse(message), ws); // test for 0.1 cpu
+        /*
         if (isDataSafe(message))
             handleMessage(JSON.parse(message), ws);
         else
             handleMessage(JSON.parse({type: 'unsafe'}), ws);
+        */
     });
 
     ws.on('close', () => {
@@ -297,7 +301,7 @@ function isPlayerInARoom(ws) {
     return found
 }
 
-function validateCreateRoom(ws) {
+function validateCreateRoom(ws, data) {
     if (!ws.id) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.USER_ID_NOT_FOUND);
         return false;
@@ -308,11 +312,16 @@ function validateCreateRoom(ws) {
         return false;
     }
 
+    if (data.board_size < 1 || data.board_size > 6) {
+        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.INVALID_BOARD_SIZE)
+        return false;
+    }
+
     return true;
 }
 
 function createRoom(data, ws) {
-    if (!validateCreateRoom(ws)) return;
+    if (!validateCreateRoom(ws, data)) return;
 
     let roomId = generateStringPassword();
 
@@ -325,7 +334,7 @@ function createRoom(data, ws) {
         teams: createTeams(),
         //mode: data.mode,
         //lockout: false,
-        board: generateBoard(data.board_size),
+        board: [],
         max_player_count: data.max_player_count || 2,
         game_started: false,
         game_ended: false,
@@ -374,11 +383,11 @@ function joinRoom(data, ws) {
     room.players.push(ws);
     joinTeam(data, ws);
 
-    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId, admin: room.admin, max_player_count: room.max_player_count, board_size: room.board.length });
+    sendData(ws, SERVER_MESSAGES.TYPES.ROOM_JOINED, { id: roomId, admin: room.admin, max_player_count: room.max_player_count, board: room.board });
     console.log(`User ${ws.id} joined room ${roomId}`);
 }
 
-function validateStartGame(room, ws) {
+function validateStartGame(room, ws, data) {
     if (!ws.id) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.USER_ID_NOT_FOUND);
         return false;
@@ -404,6 +413,11 @@ function validateStartGame(room, ws) {
         return false;
     }
 
+    if (data.board_size < 1 || data.board_size > 6) {
+        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.INVALID_BOARD_SIZE)
+        return false;
+    }
+
     return true;
 }
 
@@ -411,7 +425,7 @@ function startGame(data, ws) {
     const roomId = data.room_id;
     const room = roomPool[roomId];
 
-    if (!validateStartGame(room, ws)) return;
+    if (!validateStartGame(room, ws, data)) return;
 
     updateRoomActionTimer(room)
 
@@ -426,7 +440,7 @@ function startGame(data, ws) {
     console.log(`Game started in room ${roomId}`);
 }
 
-function validateGameRestart(room, ws) { // I know this is the same function as validateGameStart, in future i'll redo things to prevent repetition
+function validateGameRestart(room, ws, data) { // I know this is the same function as validateGameStart, in future i'll redo things to prevent repetition
     if (!ws.id) {
         sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.USER_ID_NOT_FOUND);
         return false;
@@ -447,6 +461,11 @@ function validateGameRestart(room, ws) { // I know this is the same function as 
         return false;
     }
 
+    if (data.board_size < 1 || data.board_size > 6) {
+        sendMessage(ws, SERVER_MESSAGES.TYPES.ERROR, SERVER_MESSAGES.ERROR.INVALID_BOARD_SIZE)
+        return false;
+    }
+
     return true;
 }
 
@@ -454,7 +473,7 @@ function restartGame(data, ws) {
     const roomId = data.room_id;
     const room = roomPool[roomId];
 
-    if (!validateGameRestart(room, ws)) return;
+    if (!validateGameRestart(room, ws, data)) return;
 
     updateRoomActionTimer(room)
 
@@ -777,6 +796,8 @@ function isDataSafe(message) {
 }
 
 function handleMessage(message, ws) {
+    console.log(`${ws.id} sent [type: ${message.type}]`);
+
     switch (message.type) {
         case 'ping':
             break;
@@ -855,7 +876,7 @@ function checkWebSockets() {
 
 function checkRoomRemoval() {
     const roomsToRemove = [];
-    const TIMER = 15 * 60 * 1000 // 15 mins
+    const TIMER = 30 * 60 * 1000 // 30 mins
 
     Object.entries(roomPool).forEach(([id, room]) => {
         const currentTime = Date.now();
