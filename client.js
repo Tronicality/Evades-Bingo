@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.2.2
+// @version      0.2.3
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -584,6 +584,7 @@ BingoClient.toggleBoardVisibility = () => {
 BingoClient.toggleAutoSendRuns = () => {
     BingoClient.settings.autoMarkAttempt = !BingoClient.settings.autoMarkAttempt;
     changeButtonTextContent('autoSendRunLabel', `(${BingoClient.settings.autoMarkAttempt ? 'On' : 'Off'})`, /\((On|Off)\)/)
+    saveSettings();
 }
 
 
@@ -615,6 +616,42 @@ function updateBingoTeams() {
     BingoClient.current.team = findUserTeam(BingoClient.userId)
     updateSettingsTeams()
     updateWholeBoard();
+}
+
+function canMarkCell(oldCell, newCell) {
+    const targetCell = BingoClient.board[newCell.row][newCell.col];
+    /* // Lockout moment
+    if (targetCell.marked_info.is_marked) {
+        sendMessage(ws, SERVER_MESSAGES.TYPES.MARK_ATTEMPT, SERVER_MESSAGES.RULES.CELL_ALREADY_MARKED);
+        return false;
+    }
+    */
+
+    if (!oldCell.marked_info.is_marked) {
+        return true;
+    }
+
+    // Player tryna cheat
+    if (newCell.time < minMarkAttemptTime) {
+        return false;
+    }
+
+    // Player hasn't beaten half the map
+    if (newCell.index < getHalfAreaNumber(targetCell.game_info.region)) {
+        return false;
+    }
+
+    // Player has not beaten other player area max
+    if (newCell.index < oldCell.marked_info.reached_index) {
+        return false;
+    }
+
+    // Player has not beaten other player time
+    if (newCell.time >= oldCell.marked_info.time && newCell.index === oldCell.marked_info.reached_index) {
+        return false;
+    }
+
+    return true;
 }
 
 function getCellInfo() {
@@ -651,6 +688,7 @@ function makeMarkAttempt() {
     if (!self) return;
 
     const cell = getCellInfo();
+    if (!canMarkCell(BingoClient.board[cell.row][cell.col], cell)) return;
     makeMove(BingoClient.roomId, cell);
 }
 
@@ -767,11 +805,14 @@ function saveAttempt() {
 
 function trackBingoProgress() { // Being checked every frame
     if (!BingoClient.isConnected || !BingoClient.inBingoGame || !self) return;
-    saveAttempt();
-
-    //makeMarkAttempt()
+    saveAttempt();    
 }
 
+setInterval(() => {
+    if (!BingoClient.isConnected || !BingoClient.inBingoGame || !self) return;
+    if (BingoClient.settings.autoMarkAttempt)
+        makeMarkAttempt()
+}, 500)
 
 // Global Entities and Self Interceptor
 
@@ -1663,7 +1704,6 @@ function updateServerInformation(scene) {
             document.getElementById('refreshBoardLabel').style.display = 'block';
             document.getElementById('sendRecentRunLabel').style.display = 'block';
             document.getElementById('sendAllRunsLabel').style.display = 'block';
-            document.getElementById('toggleBoardVisibilityLabel').style.display = 'block';
             document.getElementById('leaveRoomLabel').style.display = 'block';
             document.getElementById('disconnectFromServerLabel').style.display = 'block';
             break;
@@ -1825,7 +1865,7 @@ function addBingoClientSettingsLabels(labelAddedClass) {
                 addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 20, BingoClient.settings.maxPlayerCount, (event) => {handleMaxPlayerSettings(event); saveSettings();}),
                 addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 1, 6, BingoClient.settings.boardSize, (event) =>  {handleBoardSizeSliderSettings(event); saveSettings();}),
             ]),
-        //addButtonSetting(labelAddedClass, `Toggle Auto Send Runs (${BingoClient.settings.autoMarkAttempt ? 'On' : 'Off'})`, 'autoSendRunBtn', BingoClient.toggleAutoSendRuns, 'autoSendRunLabel'),
+        addButtonSetting(labelAddedClass, `Toggle Auto Send Runs (${BingoClient.settings.autoMarkAttempt ? 'On' : 'Off'})`, 'autoSendRunBtn', BingoClient.toggleAutoSendRuns, 'autoSendRunLabel'),
         addButtonSetting(labelAddedClass, `Send Recent Run Button Keybind (${BingoClient.bindings.sendRecentRun || 'None'})`, 'sendRecentRunKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendRecentRun', 'sendRecentRunKeybindLabel'); }, 'sendRecentRunKeybindLabel'),
         addButtonSetting(labelAddedClass, `Send All Runs Button Keybind (${BingoClient.bindings.sendAllRuns || 'None'})`, 'sendAllRunsKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendAllRuns', 'sendAllRunsKeybindLabel'); }, 'sendAllRunsKeybindLabel'),
         addButtonSetting(labelAddedClass, `Toggle Board Visibility (${BingoClient.bindings.toggleBoardVisibility || 'None'})`, 'toggleBoardVisibilityBtn', () => { setVariableKeyBind(BingoClient.bindings, 'toggleBoardVisibility', 'toggleBoardVisibilityKeybindLabel')}, 'toggleBoardVisibilityKeybindLabel')
