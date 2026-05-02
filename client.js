@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.2.1
+// @version      0.2.2
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -21,13 +21,10 @@
 - Fix focus bug on settings menu - DEVS MADE IT LIKE THIS
 - Fix end game
 - Fix send run buttons?
-- Fix board not resetting after game after creating new room
 - Fix assignment of new admin
 - /reset /warp upon clicking goal
-- Fix not sending sometimes
 - Fix make disconnects more lenient
 - Fix area mismatch on multiple win areas
-- Board shown on room join
 - Bug with cybot ability and color mismatching (pp)?
 - Auto send area
 - Optimise finding specific run
@@ -343,7 +340,7 @@ function handleRoomJoined(data) {
     if (BingoClient.current.boardSize > 0)
         handleGameStarted(data)
     else {
-        BingoClient.board = message.data.board;
+        BingoClient.board = data.board;
         updateServerInformation(SERVER_INFO_SCENES.IN_ROOM);
     }
 }
@@ -489,7 +486,8 @@ window.BingoClient = {
     settings: {
         maxPlayerCount: 8,
         boardSize: 3,
-        team: 'red'
+        team: 'red',
+        autoMarkAttempt: true,
     },
     current: {
         maxPlayerCount: null,
@@ -562,6 +560,7 @@ BingoClient.changeTeam = (newTeam) => {
 }
 
 BingoClient.updateWholeBoard = () => {
+    showMessage("Board has been Refreshed")
     updateWholeBoard();
 }
 
@@ -582,6 +581,11 @@ BingoClient.toggleBoardVisibility = () => {
         showBingoBoardUI();
 }
 
+BingoClient.toggleAutoSendRuns = () => {
+    BingoClient.settings.autoMarkAttempt = !BingoClient.settings.autoMarkAttempt;
+    changeButtonTextContent('autoSendRunLabel', `(${BingoClient.settings.autoMarkAttempt ? 'On' : 'Off'})`, /\((On|Off)\)/)
+}
+
 
 function saveSettings() {
     localStorage.setItem(LS_KEY, JSON.stringify({ settings: BingoClient.settings, bindings: BingoClient.bindings }));
@@ -592,8 +596,6 @@ function loadSettings() {
         const s = JSON.parse(localStorage.getItem(LS_KEY));
         if (s) {
             Object.assign(BingoClient.settings, s.settings || {});
-            Object.assign(BingoClient.bindings, s.bindings || {});
-            Object.assign(BingoClient.bindings, s.bindings || {});
         }
     } catch { }
 }
@@ -1521,9 +1523,16 @@ function setKeyBinding(event, targetObj, keyName, labelId) {
 
     showMessage(`Key binding set to: ${targetObj[keyName] || 'None'}`);
 
+    changeButtonTextContent(labelId, `(${targetObj[keyName] || 'None'})`, /\((.*?)\)/);
+}
+
+function changeButtonTextContent(labelId, text, replaceWith) {
     const labelDiv = document.querySelector(`#${labelId} .settings-setting`);
+
+    if (!labelDiv) return;
+
     const textNode = Array.from(labelDiv.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
-    textNode.textContent = textNode.textContent.replace(/\((.*?)\)/, `(${targetObj[keyName] || 'None'})`);
+    textNode.textContent = textNode.textContent.replace(replaceWith, text);
 }
 
 function setVariableKeyBind(targetObj, keyName, labelId) {
@@ -1688,11 +1697,9 @@ function addBingoServerSettingsLabels(labelAddedClass) {
         addButtonSetting(labelAddedClass, 'Reset Board', 'restartGameBtn', BingoClient.restartGame, 'restartGameLabel'),
         addButtonSetting(labelAddedClass, 'Send Recent Goal Attempt', 'sendRecentRunBtn', BingoClient.sendRecentRun, 'sendRecentRunLabel'),
         addButtonSetting(labelAddedClass, 'Send All Attempted Goals', 'sendAllRunsBtn', BingoClient.sendAllRuns, 'sendAllRunsLabel'),
-        addButtonSetting(labelAddedClass, "Toggle board Visibility", 'toggleBoardVisibilityBtn', BingoClient.toggleBoardVisibility, 'toggleBoardVisibilityLabel'),
         addButtonSetting(labelAddedClass, 'Refresh Board UI', 'updateWholeBoardBtn', BingoClient.updateWholeBoard, 'refreshBoardLabel'),      
         addButtonSetting(labelAddedClass, 'Leave Room', 'leaveRoomBtn', BingoClient.leaveRoom, 'leaveRoomLabel'),
         addButtonSetting(labelAddedClass, 'Disconnect from server', 'disconnectFromServerBtn', BingoClient.disconnectFromServer, 'disconnectFromServerLabel'),
-
     ];
 
     fragment.append(...elements);
@@ -1752,7 +1759,7 @@ function updateBingoClientSettingsLabels() {
         maxPlayerCount.disabled = true;
 
         boardSize.value = BingoClient.current.boardSize;
-        boardSize.style.display = (BingoClient.admin === BingoClient.userId) ? 'block' : 'none';
+        boardSize.style.display = (BingoClient.admin === BingoClient.userId) ? 'block' : 'none'; // needs to change to whole label
     }
     else {
         document.getElementById('room-label').textContent = 'Preset settings';
@@ -1818,6 +1825,7 @@ function addBingoClientSettingsLabels(labelAddedClass) {
                 addSliderSetting(labelAddedClass, 'Max Player Count', 'max-player-count', 2, 20, BingoClient.settings.maxPlayerCount, (event) => {handleMaxPlayerSettings(event); saveSettings();}),
                 addSliderSetting(labelAddedClass, 'Board Size', 'board-size', 1, 6, BingoClient.settings.boardSize, (event) =>  {handleBoardSizeSliderSettings(event); saveSettings();}),
             ]),
+        //addButtonSetting(labelAddedClass, `Toggle Auto Send Runs (${BingoClient.settings.autoMarkAttempt ? 'On' : 'Off'})`, 'autoSendRunBtn', BingoClient.toggleAutoSendRuns, 'autoSendRunLabel'),
         addButtonSetting(labelAddedClass, `Send Recent Run Button Keybind (${BingoClient.bindings.sendRecentRun || 'None'})`, 'sendRecentRunKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendRecentRun', 'sendRecentRunKeybindLabel'); }, 'sendRecentRunKeybindLabel'),
         addButtonSetting(labelAddedClass, `Send All Runs Button Keybind (${BingoClient.bindings.sendAllRuns || 'None'})`, 'sendAllRunsKeybindBtn', () => { setVariableKeyBind(BingoClient.bindings, 'sendAllRuns', 'sendAllRunsKeybindLabel'); }, 'sendAllRunsKeybindLabel'),
         addButtonSetting(labelAddedClass, `Toggle Board Visibility (${BingoClient.bindings.toggleBoardVisibility || 'None'})`, 'toggleBoardVisibilityBtn', () => { setVariableKeyBind(BingoClient.bindings, 'toggleBoardVisibility', 'toggleBoardVisibilityKeybindLabel')}, 'toggleBoardVisibilityKeybindLabel')
