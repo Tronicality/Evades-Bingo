@@ -632,18 +632,32 @@ function makeMove(data, ws) {
 
 function findAndRemovePlayerFromRoom(userId) {
     let found = false;
-    Object.entries(roomPool).forEach(([roomId, room]) => {
+    for (const [roomId, room] of Object.entries(roomPool)) {
         const playerIndex = room.players.findIndex((ws) => ws.id === userId);
 
-        if (playerIndex !== -1) {
-            leaveTeam({ room_id: roomId, team: findUserTeam(userId, room) }, room.players[playerIndex]);
+        if (playerIndex === -1) continue; // Player not found
 
-            room.players.splice(playerIndex, 1);
-            found = true;
-        }
-    })
+        leaveTeam({ room_id: roomId, team: findUserTeam(userId, room) }, room.players[playerIndex]);
+
+        room.players.splice(playerIndex, 1);
+        found = true;
+
+        if (room.admin === userId) 
+            assignNewAdmin(room);
+    }
 
     return found;
+}
+
+function assignNewAdmin(room, newAdminId = null) {
+    if (room.players.length <= 0) return;
+
+    const newAdmin = newAdminId || room.players[0].id; // Assign the first player as the new admin if not given
+    room.admin = newAdmin;
+
+    room.players.forEach(player => {
+        sendData(player, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
+    });
 }
 
 function removeRoom(roomId) {
@@ -679,9 +693,8 @@ function leaveRoom(data, ws) {
 
     updateRoomActionTimer(room)
 
-    if (findAndRemovePlayerFromRoom(ws.id)) {
+    if (findAndRemovePlayerFromRoom(ws.id))
         sendMessage(ws, SERVER_MESSAGES.TYPES.LEFT_ROOM, SERVER_MESSAGES.ROOM.LEFT);
-    }
 
     if (room.players.length === 0) {
         removeRoom(roomId)
@@ -690,18 +703,6 @@ function leaveRoom(data, ws) {
         room.players.forEach(player => {
             sendData(player, SERVER_MESSAGES.TYPES.PLAYER_LEFT, { user_id: ws.id });
         });
-    }
-
-    if (room.admin === ws.id) {
-        // If the admin leaves, assign a new admin
-        if (room.players.length > 0) {
-            const newAdmin = room.players[0].id // Assign the first player as the new admin
-            room.admin = newAdmin;
-
-            room.players.forEach(player => {
-                sendData(player, SERVER_MESSAGES.TYPES.NEW_ADMIN, { user_id: newAdmin });
-            });
-        }
     }
 }
 
@@ -845,6 +846,7 @@ function handleGameDisconnect(userId) {
     findAndRemovePlayerFromRoom(userId);
 
     // Maybe add buffer for reconnect chances
+    // Nah just reconnect
 }
 
 function keepAlive() {
