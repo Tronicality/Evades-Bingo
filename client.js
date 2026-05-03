@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Evades Bingo Client
 // @namespace    https://github.com/Tronicality/Evades-Bingo
-// @version      0.2.3
+// @version      0.2.4
 // @description  Evades bingo
 // @author       Br1h
 // @match        https://*.evades.io/*
@@ -17,17 +17,13 @@
 /* TODO
 - Security (not really tho)
 - Add back rest of options
-- Fix disconnect issue - hopfully fixed?
 - Fix focus bug on settings menu - DEVS MADE IT LIKE THIS
 - Fix end game
 - Fix send run buttons?
-- Fix assignment of new admin
 - /reset /warp upon clicking goal
 - Fix make disconnects more lenient
 - Fix area mismatch on multiple win areas
 - Bug with cybot ability and color mismatching (pp)?
-- Auto send area
-- Optimise finding specific run
 */
 
 // ===== Global Variables =====
@@ -35,6 +31,7 @@ let win = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
 let miniBoardEl, bigBoardEl, tooltipEl, miniHoverArea, settingsStyle, self, state, heroes, hb;
 let bingoSaveData = { board: [], lastSave: {} };
 const LS_KEY = 'evbingo:settings';
+const minMarkAttemptTime = 40;
 const TEAMS = new Set(['red', 'green', 'blue', 'orange']);
 const MESSAGE_TYPES = { // Fake Enum :sob:
     "DEFAULT": "default",
@@ -288,6 +285,7 @@ function handleUpdateTeams(data) {
 function handleNewAdmin(data) {
     showMessage(`New admin is: ${data.user_id}`);
     BingoClient.admin = data.user_id;
+    updateServerInformation(BingoClient.current.scene);
 }
 
 function handleGameEnded(data) {
@@ -485,7 +483,7 @@ window.BingoClient = {
     board: [],
     settings: {
         maxPlayerCount: 8,
-        boardSize: 3,
+        boardSize: 4,
         team: 'red',
         autoMarkAttempt: true,
     },
@@ -497,8 +495,8 @@ window.BingoClient = {
         scene: SERVER_INFO_SCENES.NOT_CONNECTED,
     },
     bindings: {
-        sendRecentRun: '-',
-        sendAllRuns: '+',
+        sendRecentRun: null,
+        sendAllRuns: null,
         toggleBoardVisibility: '.',
     },
 
@@ -688,6 +686,8 @@ function makeMarkAttempt() {
     if (!self) return;
 
     const cell = getCellInfo();
+
+    if (!cell.index) return;
     if (!canMarkCell(BingoClient.board[cell.row][cell.col], cell)) return;
     makeMove(BingoClient.roomId, cell);
 }
@@ -763,7 +763,7 @@ function findCurrentCellAttempt() {
 
 function saveAttempt() {
     if (!self) return;
-    if (self.areaNumber < getHalfAreaNumber(self.regionName) || self.survivalTime < 40) return;
+    if (self.areaNumber < getHalfAreaNumber(self.regionName) || self.survivalTime < minMarkAttemptTime) return;
     if (!Number.isNaN(bingoSaveData.lastSave.areaNumber)) { // Don't enter if not started
         if (self.areaNumber <= bingoSaveData.lastSave.areaNumber
             && regionNameFilter(bingoSaveData.lastSave.region.name) === self.regionName
@@ -793,7 +793,7 @@ function saveAttempt() {
         return;
     }
 
-    showMessage(`Saving Data: Region: ${self.regionName}, Time: ${self.survivalTime}, Area: ${self.areaNumber}`);
+    showMessage(`Saving Data: Region: ${self.regionName}, Time: ${secondsToMinutes(self.survivalTime)}, Area: ${self.areaNumber}`);
 
     //currentCellData.region = self.regionName;
     currentCellData.hero = getHero();
@@ -937,6 +937,13 @@ function showMessage(text, type = MESSAGE_TYPES.DEFAULT) {
     setTimeout(() => {
         msg.classList.remove('show');
         msg.classList.add('hide');
+
+        msg.style.height = msg.offsetHeight + 'px'; // lock current height
+        requestAnimationFrame(() => {
+            msg.style.height = '0';
+            msg.style.padding = '0';
+            msg.style.marginBottom = '0';
+        });
     }, 5000);
 
     // Remove after animation ends
@@ -972,7 +979,8 @@ function addMessageHandler() {
   min-width: 200px;
   opacity: 0;
   transform: translateY(-10px);
-  transition: opacity 0.4s ease, transform 0.4s ease;
+  overflow: hidden;
+  transition: opacity 0.4s ease, transform 0.4s ease, height 0.4s ease, padding 0.4s ease;
 }
 
 .message.show {
